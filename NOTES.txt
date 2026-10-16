@@ -6,3 +6,6 @@
 2026-10-16: FIX photo resolution (was 1.6 MP): ImageCapture now uses HIGHEST_AVAILABLE_STRATEGY + prefer-higher-resolution, camera JPEG quality 100; old 4000x3000 / "capture rate" target removed
 2026-10-16: lens support: back lenses (ultra wide / main / tele) found from the phone's own cameras; zoom pill cycles 0.7x / 1x / 2x / 4x and switches lens automatically
 2026-10-16: photo mode merges 3 frames (native align+merge+enhance) for less noise; Settings toggle (off with flash/HDR); Pro ISO max raised to 6400 cap;
+2026-10-16: 50 MP restored: sizes read from the camera (std binned 12 MP vs max 50 MP via high-resolution output sizes); chip above preview switches 12/50 MP (photo and pro modes only; 50 MP saved unprocessed, no 3-shot merge)
+2026-10-16: UI redesign of camera screen: yellow text mode strip (Photo/Night/Pro/Video), iOS-style lens buttons (0.7/1/2/4) under preview with live zoom, rounded-square gallery thumbnail, horizon level line (accelerometer, toggle in Settings), haptic ticks
+2026-10-16: camera info now lists max photo size per lens (50 MP on main), sensor pixels separately; settings: 50 MP toggle back, horizon line toggle; device facts used (Galaxy A16 4G: 50MP f/1.8 main, 5MP ultra wide, 13MP front, video 1080p30 with EIS) -> video default FHD with stabilization

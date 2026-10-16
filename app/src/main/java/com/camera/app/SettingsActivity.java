@@ -53,6 +53,10 @@ public class SettingsActivity extends BaseActivity {
         content.addView(Ui.rowView(this, content, new Row(R.drawable.ic_image, false,
                 getString(R.string.set_jpeg), Store.num(this, "jpeg_q", 95) + "%", false, true).tint(ORANGE),
                 v -> pickJpeg()));
+        Ui.Toggle hr = Ui.toggle(this, content, R.string.set_hires, R.string.set_hires_sub,
+                Store.bool(this, "hires", false), R.drawable.ic_camera, TEAL);
+        hr.onChange((b, on) -> Store.setBool(this, "hires", on));
+        content.addView(hr.view);
         Ui.Toggle hi = Ui.toggle(this, content, R.string.set_multi, R.string.set_multi_sub,
                 Store.bool(this, "multi_photo", true), R.drawable.ic_aspect, PINK);
         hi.onChange((b, on) -> Store.setBool(this, "multi_photo", on));
@@ -77,6 +81,10 @@ public class SettingsActivity extends BaseActivity {
                 R.drawable.ic_grid, TEAL);
         gr.onChange((b, on) -> Store.setBool(this, "grid", on));
         content.addView(gr.view);
+        Ui.Toggle ll = Ui.toggle(this, content, R.string.set_level_line, R.string.set_level_line_sub,
+                Store.bool(this, "level_line", true), R.drawable.ic_adjust, ORANGE);
+        ll.onChange((b2, on) -> Store.setBool(this, "level_line", on));
+        content.addView(ll.view);
 
         content.addView(Ui.sectionTitle(this, getString(R.string.theme_title)));
         content.addView(Ui.rowView(this, content, new Row(R.drawable.ic_palette, true,

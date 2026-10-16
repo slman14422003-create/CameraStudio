@@ -8,7 +8,9 @@ import android.os.Environment;
 import android.provider.MediaStore;
 import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraMetadata;
+import android.graphics.ImageFormat;
 import android.hardware.camera2.CaptureRequest;
+import android.hardware.camera2.params.StreamConfigurationMap;
 import android.util.Range;
 import android.util.Size;
 
@@ -139,6 +141,8 @@ final class CameraEngine {
     Quality videoQuality;
     Size videoSize;       // chosen recording size (landscape, as the camera reports it)
     Size photoSize;       // size of the still the bound camera will give
+    Size stdSize, maxSize;   // biggest normal 4:3 JPEG (binned, e.g. 12 MP) and biggest overall (e.g. 50 MP)
+    boolean hiresAvailable;
     private Range<Integer> nightFps;
     private boolean nrHq, edgeHq, abHq;
 
@@ -201,6 +205,10 @@ final class CameraEngine {
         bind();
     }
 
+    boolean isHires() {
+        return hires;
+    }
+
     void setHdr(boolean h) {
         if (hdr == h) return;
         hdr = h;
@@ -214,9 +222,10 @@ final class CameraEngine {
     void setMode(int m) {
         if (mode == m) return;
         boolean wasVideo = mode == VIDEO;
+        boolean hiBefore = hiresActive();
         mode = m;
         if (wasVideo != (m == VIDEO)) torch = false;
-        if (wasVideo != (m == VIDEO) || wantExtension() != extActive) {
+        if (wasVideo != (m == VIDEO) || hiBefore != hiresActive() || wantExtension() != extActive) {
             bind();
         } else {
             applyFlash();
@@ -420,6 +429,21 @@ final class CameraEngine {
 
     // ------------------------------------------------------------------ binding
 
+    private static Size best43(Size[] a, Size cur) {
+        Size best = cur;
+        if (a == null) return best;
+        for (Size z : a) {
+            if (z.getWidth() * 3 != z.getHeight() * 4 && z.getHeight() * 3 != z.getWidth() * 4) continue;
+            if (best == null || (long) z.getWidth() * z.getHeight() > (long) best.getWidth() * best.getHeight()) best = z;
+        }
+        return best;
+    }
+
+    /** True when the full-resolution (e.g. 50 MP) mode is on and usable in the current mode. */
+    boolean hiresActive() {
+        return hires && hiresAvailable && (mode == PHOTO || mode == PRO);
+    }
+
     private static boolean has(int[] a, int v) {
         if (a == null) return false;
         for (int x : a) if (x == v) return true;
@@ -434,12 +458,26 @@ final class CameraEngine {
         nightFps = null;
         videoQualities.clear();
         stabSupported = false;
+        stdSize = null;
+        maxSize = null;
+        hiresAvailable = false;
         awbModes.clear();
         try {
             List<CameraInfo> infos = sel.filter(provider.getAvailableCameraInfos());
             if (infos.isEmpty()) return;
             Camera2CameraInfo c2 = Camera2CameraInfo.from(infos.get(0));
             hasFlash = infos.get(0).hasFlashUnit();
+            try {
+                StreamConfigurationMap map = c2.getCameraCharacteristic(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
+                if (map != null) {
+                    stdSize = best43(map.getOutputSizes(ImageFormat.JPEG), null);
+                    maxSize = best43(map.getHighResolutionOutputSizes(ImageFormat.JPEG), stdSize);
+                    hiresAvailable = stdSize != null && maxSize != null
+                            && (long) maxSize.getWidth() * maxSize.getHeight()
+                            > (long) stdSize.getWidth() * stdSize.getHeight() * 3 / 2;
+                }
+            } catch (Throwable ignored) {
+            }
             try {
                 videoQualities.addAll(QualitySelector.getSupportedQualities(infos.get(0)));
             } catch (Throwable ignored) {
@@ -549,13 +587,19 @@ final class CameraEngine {
             } else {
                 // photos: 4:3, about 12 MP (the A16 bins its 50 MP sensor to 12.5 MP: sharper and much faster);
                 // "high resolution" asks CameraX for the full sensor size instead
-                // always the biggest 4:3 picture the camera can give (the old 4000x3000 target + "capture rate"
-                // preference made CameraX fall back to about 1.6 MP on this kind of phone)
-                ResolutionSelector shotRes = new ResolutionSelector.Builder()
+                // the exact biggest 4:3 size the camera reports: the normal one (binned, sharper in low light) or,
+                // with the full-resolution switch on, the biggest of all (50 MP on the Galaxy A16)
+                Size target = hiresActive() ? maxSize : stdSize;
+                ResolutionSelector.Builder rb = new ResolutionSelector.Builder()
                         .setAspectRatioStrategy(AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY)
-                        .setResolutionStrategy(ResolutionStrategy.HIGHEST_AVAILABLE_STRATEGY)
-                        .setAllowedResolutionMode(ResolutionSelector.PREFER_HIGHER_RESOLUTION_OVER_CAPTURE_RATE)
-                        .build();
+                        .setAllowedResolutionMode(ResolutionSelector.PREFER_HIGHER_RESOLUTION_OVER_CAPTURE_RATE);
+                if (target != null) {
+                    rb.setResolutionStrategy(new ResolutionStrategy(target,
+                            ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER));
+                } else {
+                    rb.setResolutionStrategy(ResolutionStrategy.HIGHEST_AVAILABLE_STRATEGY);
+                }
+                ResolutionSelector shotRes = rb.build();
                 ResolutionSelector previewRes = new ResolutionSelector.Builder()
                         .setAspectRatioStrategy(AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY).build();
 

@@ -11,6 +11,10 @@ import android.graphics.Color;
 import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.Typeface;
+import android.hardware.Sensor;
+import android.hardware.SensorEvent;
+import android.hardware.SensorEventListener;
+import android.hardware.SensorManager;
 import android.graphics.drawable.GradientDrawable;
 import android.media.MediaMetadataRetriever;
 import android.media.MediaScannerConnection;
@@ -73,7 +77,11 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
     private FrameLayout holder;
     private GridView grid;
     private View focusRing;
-    private TextView status, zoomPill, hdrBtn, timerBtn, infoPill, countView;
+    private TextView status, hdrBtn, timerBtn, resBtn, infoPill, countView;
+    private LinearLayout lensRow;
+    private final List<TextView> lensBtns = new ArrayList<>();
+    private final List<Float> lensStops = new ArrayList<>();
+    private LevelView levelView;
     private LinearLayout videoRow;
     private final List<TextView> videoChips = new ArrayList<>();
     private boolean recActive, counting, lastIsVideo, multiShot;
@@ -214,6 +222,23 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         tmp.setMarginStart(dp(6));
         top.addView(timerBtn, tmp);
         top.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1f));
+        resBtn = new TextView(this);
+        resBtn.setTextSize(12.5f);
+        resBtn.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
+        resBtn.setGravity(Gravity.CENTER);
+        resBtn.setPadding(dp(10), dp(5), dp(10), dp(5));
+        resBtn.setOnClickListener(v -> {
+            if (busy || recActive || counting) return;
+            boolean on = !Store.bool(this, "hires", false);
+            Store.setBool(this, "hires", on);
+            wantHires = on;
+            engine.setHires(on);
+            refreshTop();
+        });
+        Ui.press(this, resBtn);
+        LinearLayout.LayoutParams rbp = new LinearLayout.LayoutParams(-2, -2);
+        rbp.setMarginEnd(dp(4));
+        top.addView(resBtn, rbp);
         gridBtn = Ios.navIcon(this, R.drawable.ic_grid, R.string.cam_grid, v -> {
             Store.setBool(this, "grid", !Store.bool(this, "grid", true));
             refreshTop();
@@ -232,6 +257,8 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         holder.addView(previewView, new FrameLayout.LayoutParams(-1, -1));
         grid = new GridView(this);
         holder.addView(grid, new FrameLayout.LayoutParams(-1, -1));
+        levelView = new LevelView(this);
+        holder.addView(levelView, new FrameLayout.LayoutParams(-1, -1));
 
         focusRing = new View(this);
         GradientDrawable ring = new GradientDrawable();
@@ -267,13 +294,17 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         countView.setVisibility(View.GONE);
         holder.addView(countView, new FrameLayout.LayoutParams(-1, -1, Gravity.CENTER));
 
-        zoomPill = pill();
-        zoomPill.setText("1×");
-        zoomPill.setOnClickListener(v -> cycleZoom());
-        Ui.press(this, zoomPill);
+        lensRow = new LinearLayout(this);
+        lensRow.setOrientation(LinearLayout.HORIZONTAL);
+        lensRow.setGravity(Gravity.CENTER);
+        GradientDrawable lg = new GradientDrawable();
+        lg.setCornerRadius(dp(100));
+        lg.setColor(0x73000000);
+        lensRow.setBackground(lg);
+        lensRow.setPadding(dp(5), dp(5), dp(5), dp(5));
         FrameLayout.LayoutParams zp = new FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
         zp.bottomMargin = dp(10);
-        holder.addView(zoomPill, zp);
+        holder.addView(lensRow, zp);
 
         buildProPanel();
         FrameLayout.LayoutParams pp = new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM);
@@ -339,13 +370,23 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         int[] names = {R.string.cam_mode_photo, R.string.cam_mode_night, R.string.cam_mode_pro, R.string.cam_mode_video};
         for (int i = 0; i < 4; i++) {
             final int m = i;
-            TextView ch = Ui.chip(this, getString(names[i]), i == 0);
-            ch.setOnClickListener(v -> setMode(m));
-            modeChips.add(ch);
-            modes.addView(ch);
+            TextView t = new TextView(this);
+            t.setText(getString(names[i]).toUpperCase(Locale.getDefault()));
+            t.setTextSize(13.5f);
+            t.setLetterSpacing(0.05f);
+            t.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
+            t.setPadding(dp(16), dp(8), dp(16), dp(8));
+            t.setOnClickListener(v -> {
+                v.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
+                setMode(m);
+            });
+            Ui.press(this, t);
+            styleMode(t, i == 0);
+            modeChips.add(t);
+            modes.addView(t);
         }
         LinearLayout.LayoutParams mp = new LinearLayout.LayoutParams(-2, -2);
-        mp.topMargin = dp(12);
+        mp.topMargin = dp(6);
         bottom.addView(modes, mp);
 
         LinearLayout shutterRow = new LinearLayout(this);
@@ -356,7 +397,7 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         thumb = new ImageView(this);
         thumb.setScaleType(ImageView.ScaleType.CENTER_CROP);
         GradientDrawable tb = new GradientDrawable();
-        tb.setShape(GradientDrawable.OVAL);
+        tb.setCornerRadius(dp(12));
         tb.setColor(Ui.color(this, R.color.neutral_soft));
         thumb.setBackground(tb);
         thumb.setClipToOutline(true);
@@ -693,6 +734,64 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         refreshModeUi();
     }
 
+    private void styleMode(TextView t, boolean sel) {
+        t.setTextColor(sel ? Ios.YELLOW : 0xB3FFFFFF);
+    }
+
+    /** The lens buttons (0.7 / 1 / 2 / 4 …) under the preview, iOS style: the active one is yellow and shows the exact zoom. */
+    private void rebuildLensRow() {
+        lensRow.removeAllViews();
+        lensBtns.clear();
+        lensStops.clear();
+        if (engine == null) return;
+        if (!engine.isFront() && engine.lenses.size() > 1) {
+            for (CameraEngine.Lens l : engine.lenses) if (!lensStops.contains(l.factor)) lensStops.add(l.factor);
+            for (float st : new float[]{1f, 2f, 4f}) if (!lensStops.contains(st)) lensStops.add(st);
+        } else {
+            float max = engine.zoomMax() * engine.lensFactor();
+            for (float st : new float[]{1f, 2f, 4f}) if (st <= max + 0.01f) lensStops.add(st);
+            if (lensStops.isEmpty()) lensStops.add(1f);
+        }
+        java.util.Collections.sort(lensStops);
+        for (final float st : lensStops) {
+            TextView b = new TextView(this);
+            b.setGravity(Gravity.CENTER);
+            b.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
+            b.setOnClickListener(v -> {
+                v.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
+                if (engine.isFront() || engine.lenses.size() < 2) engine.setZoom(st);
+                else goToStop(st);
+            });
+            Ui.press(this, b);
+            lensBtns.add(b);
+            lensRow.addView(b, new LinearLayout.LayoutParams(-2, dp(34)));
+        }
+        updateLens(engine.zoom() * engine.lensFactor());
+    }
+
+    private void updateLens(float display) {
+        if (lensStops.isEmpty()) return;
+        int near = 0;
+        for (int i = 0; i < lensStops.size(); i++) {
+            if (Math.abs(lensStops.get(i) - display) < Math.abs(lensStops.get(near) - display)) near = i;
+        }
+        for (int i = 0; i < lensBtns.size(); i++) {
+            TextView b = lensBtns.get(i);
+            boolean sel = i == near;
+            float st = lensStops.get(i);
+            String plain = Math.abs(st - Math.round(st)) < 0.05f ? String.valueOf(Math.round(st))
+                    : String.format(Locale.US, "%.1f", st);
+            b.setText(sel ? zoomText(display) : plain);
+            b.setTextSize(sel ? 13f : 12f);
+            b.setTextColor(sel ? Ios.YELLOW : 0xFFFFFFFF);
+            b.setMinWidth(dp(sel ? 46 : 34));
+            GradientDrawable g = new GradientDrawable();
+            g.setCornerRadius(dp(100));
+            g.setColor(sel ? 0xB3000000 : 0x00000000);
+            b.setBackground(g);
+        }
+    }
+
     private void cycleTimer() {
         if (counting || recActive) return;
         int t = Store.num(this, "timer", 0);
@@ -739,7 +838,7 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
 
     private void refreshModeUi() {
         int m = engine == null ? CameraEngine.PHOTO : engine.mode();
-        for (int i = 0; i < modeChips.size(); i++) Ui.setChip(this, modeChips.get(i), i == m);
+        for (int i = 0; i < modeChips.size(); i++) styleMode(modeChips.get(i), i == m);
         boolean vid = m == CameraEngine.VIDEO;
         levelRow.setVisibility(vid ? View.GONE : m == CameraEngine.NIGHT ? View.INVISIBLE : View.VISIBLE);
         videoRow.setVisibility(vid ? View.VISIBLE : View.GONE);
@@ -765,6 +864,20 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         flashBtn.setVisibility(canFlash ? View.VISIBLE : View.INVISIBLE);
         int[] icons = {R.drawable.ic_flash_off, R.drawable.ic_flash_auto, R.drawable.ic_flash};
         flashBtn.setImageResource(video ? (engine.torchOn() ? icons[2] : icons[0]) : icons[flashState]);
+        boolean hiOk = engine != null && engine.hiresAvailable && (engine.mode() == CameraEngine.PHOTO
+                || engine.mode() == CameraEngine.PRO);
+        resBtn.setVisibility(hiOk ? View.VISIBLE : View.GONE);
+        if (hiOk) {
+            boolean hi = engine.isHires();
+            android.util.Size z = hi ? engine.maxSize : engine.stdSize;
+            resBtn.setText(z == null ? "" : CamInfo.mpText(z.getWidth(), z.getHeight()));
+            GradientDrawable rg = new GradientDrawable();
+            rg.setCornerRadius(dp(100));
+            rg.setColor(hi ? Ios.YELLOW : Ui.color(this, R.color.neutral_soft));
+            resBtn.setBackground(rg);
+            resBtn.setTextColor(hi ? Color.BLACK : Color.WHITE);
+        }
+        if (levelView != null) levelView.setEnabledLine(Store.bool(this, "level_line", true));
         int tsec = Store.num(this, "timer", 0);
         timerBtn.setText(tsec == 0 ? "⏱" : "⏱ " + tsec + "s");
         GradientDrawable tg = new GradientDrawable();
@@ -1001,7 +1114,7 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
     private void shootNow() {
         if (busy) return;
         if (engine.mode() == CameraEngine.PHOTO && Store.bool(this, "multi_photo", true) && flashState == 0
-                && !Store.bool(this, "hdr", false) && Native.LOADED && !Levels.OFF.equals(level)) {
+                && !Store.bool(this, "hdr", false) && !engine.hiresActive() && Native.LOADED && !Levels.OFF.equals(level)) {
             multiShot = true;
             busy = true;
             shutter.setBusy(true);
@@ -1312,6 +1425,7 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
             engine.setHires(h);
         }
         engine.checkPrefs();
+        if (levelView != null) levelView.start();
         level = Store.str(this, "level", level);
         for (TextView c : levelChips) Ui.setChip(this, c, level.equals(c.getTag()));
         refreshTop();
@@ -1321,6 +1435,7 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
 
     @Override
     protected void onPause() {
+        if (levelView != null) levelView.stop();
         if (counting) cancelCountdown();
         if (recActive) engine.stopRecording();
         if (orient != null) orient.disable();
@@ -1351,7 +1466,8 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         if (m) rebuildPro();
         refreshModeUi();
         refreshTop();
-        zoomPill.setText(zoomText(engine.zoom() * engine.lensFactor()));
+        rebuildLensRow();
+        refreshInfoPill();
         if (pendingStop > 0f) {
             float z = pendingStop;
             pendingStop = -1f;
@@ -1366,7 +1482,7 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
 
     @Override
     public void onZoom(float ratio) {
-        zoomPill.setText(zoomText(ratio * engine.lensFactor()));
+        updateLens(ratio * engine.lensFactor());
     }
 
     @Override
@@ -1391,6 +1507,71 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
             int width = MeasureSpec.getSize(w);
             super.onMeasure(MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY),
                     MeasureSpec.makeMeasureSpec(width * 4 / 3, MeasureSpec.EXACTLY));
+        }
+    }
+
+    /** Horizon line: a short bar that turns yellow when the phone is perfectly level (uses the accelerometer). */
+    private static final class LevelView extends View implements SensorEventListener {
+        private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final SensorManager sm;
+        private float roll;
+        private boolean show, on = true, running;
+
+        LevelView(android.content.Context c) {
+            super(c);
+            sm = (SensorManager) c.getSystemService(android.content.Context.SENSOR_SERVICE);
+            p.setStrokeCap(Paint.Cap.ROUND);
+            p.setStrokeWidth(Ui.dpf(c, 2f));
+            setWillNotDraw(false);
+        }
+
+        void setEnabledLine(boolean e) {
+            on = e;
+            invalidate();
+        }
+
+        void start() {
+            if (running || sm == null) return;
+            Sensor a = sm.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
+            if (a != null) {
+                sm.registerListener(this, a, SensorManager.SENSOR_DELAY_UI);
+                running = true;
+            }
+        }
+
+        void stop() {
+            if (sm != null) sm.unregisterListener(this);
+            running = false;
+        }
+
+        @Override
+        public void onSensorChanged(SensorEvent e) {
+            float ax = e.values[0], ay = e.values[1], az = e.values[2];
+            boolean upright = Math.abs(az) < 6f && ay > 4f;
+            float r = (float) Math.toDegrees(Math.atan2(ax, ay));
+            roll = roll * 0.75f + r * 0.25f;
+            show = upright && Math.abs(roll) < 25f;
+            if (on) invalidate();
+        }
+
+        @Override
+        public void onAccuracyChanged(Sensor s, int a) {
+        }
+
+        @Override
+        protected void onDraw(Canvas c) {
+            if (!on || !show) return;
+            float w = getWidth(), h = getHeight(), cx = w / 2f, cy = h / 2f;
+            float len = Ui.dpf(getContext(), 34f), gap = Ui.dpf(getContext(), 14f);
+            boolean level = Math.abs(roll) < 1.2f;
+            p.setColor(0xB3FFFFFF);
+            c.drawLine(cx - gap - len * 1.6f, cy, cx - gap - len * 0.6f, cy, p);
+            c.drawLine(cx + gap + len * 0.6f, cy, cx + gap + len * 1.6f, cy, p);
+            p.setColor(level ? Ios.YELLOW : 0xE6FFFFFF);
+            c.save();
+            c.rotate(-roll, cx, cy);
+            c.drawLine(cx - len, cy, cx + len, cy, p);
+            c.restore();
         }
     }
 

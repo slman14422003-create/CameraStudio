@@ -4,6 +4,7 @@ import android.content.Context;
 import android.graphics.Typeface;
 import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraManager;
+import android.graphics.ImageFormat;
 import android.hardware.camera2.CameraMetadata;
 import android.hardware.camera2.params.StreamConfigurationMap;
 import android.media.MediaRecorder;
@@ -114,6 +115,24 @@ final class CamInfo {
         if (px != null) {
             b.append(c.getString(R.string.info_mp)).append(": ").append(mpText(px.getWidth(), px.getHeight()))
                     .append(" (").append(px.getWidth()).append("×").append(px.getHeight()).append(")\n");
+        }
+        try {
+            StreamConfigurationMap pm = ch.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
+            Size top = null;
+            if (pm != null) {
+                Size[][] all = {pm.getOutputSizes(ImageFormat.JPEG), pm.getHighResolutionOutputSizes(ImageFormat.JPEG)};
+                for (Size[] arr : all) {
+                    if (arr == null) continue;
+                    for (Size z : arr) {
+                        if (top == null || (long) z.getWidth() * z.getHeight() > (long) top.getWidth() * top.getHeight()) top = z;
+                    }
+                }
+            }
+            if (top != null) {
+                b.append(c.getString(R.string.info_photo)).append(": ").append(mpText(top.getWidth(), top.getHeight()))
+                        .append(" (").append(top.getWidth()).append("×").append(top.getHeight()).append(")\n");
+            }
+        } catch (Throwable ignored) {
         }
         if (mm != null) {
             b.append(c.getString(R.string.info_sensor)).append(": ")
