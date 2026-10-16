@@ -59,6 +59,19 @@ public class SettingsActivity extends BaseActivity {
         content.addView(hi.view);
         content.addView(Ui.footer(this, getString(R.string.set_quality_note)));
 
+        content.addView(Ui.sectionTitle(this, getString(R.string.set_video)));
+        Ui.Toggle vs = Ui.toggle(this, content, R.string.set_vstab, R.string.set_vstab_sub,
+                Store.bool(this, "vstab", true), R.drawable.ic_focus, GREEN);
+        vs.onChange((bt, on) -> Store.setBool(this, "vstab", on));
+        content.addView(vs.view);
+        Ui.Toggle va = Ui.toggle(this, content, R.string.set_vaudio, R.string.set_vaudio_sub,
+                Store.bool(this, "vaudio", true), R.drawable.ic_speed, ORANGE);
+        va.onChange((bt, on) -> Store.setBool(this, "vaudio", on));
+        content.addView(va.view);
+        content.addView(Ui.rowView(this, content, new Row(R.drawable.ic_camera, false,
+                getString(R.string.set_cam_info), getString(R.string.set_cam_info_sub), false, true).tint(BLUE),
+                v -> CamInfo.show(this)));
+
         content.addView(Ui.sectionTitle(this, getString(R.string.set_view)));
         Ui.Toggle gr = Ui.toggle(this, content, R.string.cam_grid, 0, Store.bool(this, "grid", true),
                 R.drawable.ic_grid, TEAL);

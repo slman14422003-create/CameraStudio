@@ -12,12 +12,17 @@ import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.media.MediaMetadataRetriever;
+import android.media.MediaScannerConnection;
 import android.net.Uri;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.Build;
 import android.os.Bundle;
 import android.provider.MediaStore;
 import android.view.Gravity;
 import android.view.HapticFeedbackConstants;
+import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.OrientationEventListener;
 import android.view.ScaleGestureDetector;
@@ -40,6 +45,7 @@ import androidx.appcompat.app.AppCompatDelegate;
 import androidx.camera.core.ImageCapture;
 import androidx.camera.core.ImageCaptureException;
 import androidx.camera.core.ImageProxy;
+import androidx.camera.video.VideoRecordEvent;
 import androidx.camera.view.PreviewView;
 import androidx.core.content.ContextCompat;
 import androidx.core.splashscreen.SplashScreen;
@@ -67,7 +73,12 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
     private FrameLayout holder;
     private GridView grid;
     private View focusRing;
-    private TextView status, zoomPill, hdrBtn;
+    private TextView status, zoomPill, hdrBtn, timerBtn, infoPill, countView;
+    private LinearLayout videoRow;
+    private final List<TextView> videoChips = new ArrayList<>();
+    private boolean recActive, counting, lastIsVideo;
+    private String recText = "";
+    private final Handler hand = new Handler(Looper.getMainLooper());
     private ImageButton flashBtn, gridBtn, switchBtn;
     private ImageView thumb;
     private ShutterView shutter;
@@ -90,6 +101,9 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
     private Uri lastUri;
     private OrientationEventListener orient;
     private final ExecutorService io = Executors.newSingleThreadExecutor();
+
+    private final ActivityResultLauncher<String> audioLauncher = registerForActivityResult(
+            new ActivityResultContracts.RequestPermission(), r -> { });
 
     private final ActivityResultLauncher<String[]> permLauncher = registerForActivityResult(
             new ActivityResultContracts.RequestMultiplePermissions(), r -> afterPermission());
@@ -187,6 +201,17 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         LinearLayout.LayoutParams hp = new LinearLayout.LayoutParams(-2, -2);
         hp.setMarginStart(dp(6));
         top.addView(hdrBtn, hp);
+        timerBtn = new TextView(this);
+        timerBtn.setTextSize(13);
+        timerBtn.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
+        timerBtn.setGravity(Gravity.CENTER);
+        timerBtn.setContentDescription(getString(R.string.cam_timer));
+        timerBtn.setPadding(dp(12), dp(5), dp(12), dp(5));
+        timerBtn.setOnClickListener(v -> cycleTimer());
+        Ui.press(this, timerBtn);
+        LinearLayout.LayoutParams tmp = new LinearLayout.LayoutParams(-2, -2);
+        tmp.setMarginStart(dp(6));
+        top.addView(timerBtn, tmp);
         top.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1f));
         gridBtn = Ios.navIcon(this, R.drawable.ic_grid, R.string.cam_grid, v -> {
             Store.setBool(this, "grid", !Store.bool(this, "grid", true));
@@ -220,6 +245,26 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         sp.topMargin = dp(10);
         status.setVisibility(View.GONE);
         holder.addView(status, sp);
+
+        infoPill = pill();
+        infoPill.setTextSize(12);
+        infoPill.setContentDescription(getString(R.string.cam_info));
+        infoPill.setOnClickListener(v -> CamInfo.show(this));
+        Ui.press(this, infoPill);
+        FrameLayout.LayoutParams ip = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.START);
+        ip.topMargin = dp(10);
+        ip.setMarginStart(dp(10));
+        infoPill.setVisibility(View.GONE);
+        holder.addView(infoPill, ip);
+
+        countView = new TextView(this);
+        countView.setTextColor(Color.WHITE);
+        countView.setTextSize(96);
+        countView.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
+        countView.setShadowLayer(dp(8), 0, 0, 0xAA000000);
+        countView.setGravity(Gravity.CENTER);
+        countView.setVisibility(View.GONE);
+        holder.addView(countView, new FrameLayout.LayoutParams(-1, -1, Gravity.CENTER));
 
         zoomPill = pill();
         zoomPill.setText("1×");
@@ -278,13 +323,20 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
             levelChips.add(ch);
             levelRow.addView(ch);
         }
-        bottom.addView(levelRow, new LinearLayout.LayoutParams(-2, -2));
+        videoRow = new LinearLayout(this);
+        videoRow.setOrientation(LinearLayout.HORIZONTAL);
+        videoRow.setGravity(Gravity.CENTER);
+        videoRow.setVisibility(View.GONE);
+        FrameLayout rowWrap = new FrameLayout(this);
+        rowWrap.addView(levelRow, new FrameLayout.LayoutParams(-2, -2, Gravity.CENTER));
+        rowWrap.addView(videoRow, new FrameLayout.LayoutParams(-2, -2, Gravity.CENTER));
+        bottom.addView(rowWrap, new LinearLayout.LayoutParams(-2, -2));
 
         LinearLayout modes = new LinearLayout(this);
         modes.setOrientation(LinearLayout.HORIZONTAL);
         modes.setGravity(Gravity.CENTER);
-        int[] names = {R.string.cam_mode_photo, R.string.cam_mode_night, R.string.cam_mode_pro};
-        for (int i = 0; i < 3; i++) {
+        int[] names = {R.string.cam_mode_photo, R.string.cam_mode_night, R.string.cam_mode_pro, R.string.cam_mode_video};
+        for (int i = 0; i < 4; i++) {
             final int m = i;
             TextView ch = Ui.chip(this, getString(names[i]), i == 0);
             ch.setOnClickListener(v -> setMode(m));
@@ -629,17 +681,72 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
     // ================================================================== state
 
     private void setMode(int m) {
-        if (busy) return;
+        if (busy || recActive || counting) return;
         engine.setMode(m);
+        if (m == CameraEngine.VIDEO && Store.bool(this, "vaudio", true)
+                && ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+                != PackageManager.PERMISSION_GRANTED && !Store.bool(this, "asked_audio", false)) {
+            Store.setBool(this, "asked_audio", true);
+            audioLauncher.launch(Manifest.permission.RECORD_AUDIO);
+        }
         refreshModeUi();
+    }
+
+    private void cycleTimer() {
+        if (counting || recActive) return;
+        int t = Store.num(this, "timer", 0);
+        Store.setNum(this, "timer", t == 0 ? 3 : t == 3 ? 10 : 0);
+        refreshTop();
+    }
+
+    private void rebuildVideoRow() {
+        videoRow.removeAllViews();
+        videoChips.clear();
+        String cur = engine.videoQuality == null ? "" : CameraEngine.qCode(engine.videoQuality);
+        List<androidx.camera.video.Quality> qs = new ArrayList<>(engine.videoQualities);
+        for (int i = qs.size() - 1; i >= 0; i--) {
+            final androidx.camera.video.Quality q = qs.get(i);
+            TextView ch = Ui.chip(this, CameraEngine.qName(q), CameraEngine.qCode(q).equals(cur));
+            ch.setTag(CameraEngine.qCode(q));
+            ch.setOnClickListener(v -> {
+                if (recActive || counting) return;
+                Store.setStr(this, "video_q", CameraEngine.qCode(q));
+                engine.bind();
+            });
+            videoChips.add(ch);
+            videoRow.addView(ch);
+        }
+    }
+
+    private void refreshInfoPill() {
+        String t = "";
+        if (engine != null && started) {
+            if (engine.mode() == CameraEngine.VIDEO) {
+                if (engine.videoQuality != null) {
+                    t = CameraEngine.qName(engine.videoQuality);
+                    if (engine.videoSize != null) {
+                        t = CamInfo.videoName(engine.videoSize.getWidth(), engine.videoSize.getHeight()) + " · 30";
+                    }
+                }
+            } else if (engine.photoSize != null) {
+                t = CamInfo.mpText(engine.photoSize.getWidth(), engine.photoSize.getHeight());
+            }
+        }
+        infoPill.setText(t);
+        infoPill.setVisibility(t.isEmpty() ? View.GONE : View.VISIBLE);
     }
 
     private void refreshModeUi() {
         int m = engine == null ? CameraEngine.PHOTO : engine.mode();
         for (int i = 0; i < modeChips.size(); i++) Ui.setChip(this, modeChips.get(i), i == m);
-        levelRow.setVisibility(m == CameraEngine.NIGHT ? View.INVISIBLE : View.VISIBLE);
+        boolean vid = m == CameraEngine.VIDEO;
+        levelRow.setVisibility(vid ? View.GONE : m == CameraEngine.NIGHT ? View.INVISIBLE : View.VISIBLE);
+        videoRow.setVisibility(vid ? View.VISIBLE : View.GONE);
+        if (vid && engine != null) rebuildVideoRow();
         proPanel.setVisibility(m == CameraEngine.PRO ? View.VISIBLE : View.GONE);
         shutter.setNight(m == CameraEngine.NIGHT);
+        shutter.setVideo(vid);
+        refreshInfoPill();
         if (m == CameraEngine.PRO && engine != null) rebuildPro();
         refreshTop();
     }
@@ -652,10 +759,18 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
 
     private void refreshTop() {
         boolean photo = engine == null || engine.mode() == CameraEngine.PHOTO;
-        boolean canFlash = engine != null && engine.hasFlash && !engine.isFront() && photo;
+        boolean video = engine != null && engine.mode() == CameraEngine.VIDEO;
+        boolean canFlash = engine != null && engine.hasFlash && !engine.isFront() && (photo || video);
         flashBtn.setVisibility(canFlash ? View.VISIBLE : View.INVISIBLE);
         int[] icons = {R.drawable.ic_flash_off, R.drawable.ic_flash_auto, R.drawable.ic_flash};
-        flashBtn.setImageResource(icons[flashState]);
+        flashBtn.setImageResource(video ? (engine.torchOn() ? icons[2] : icons[0]) : icons[flashState]);
+        int tsec = Store.num(this, "timer", 0);
+        timerBtn.setText(tsec == 0 ? "⏱" : "⏱ " + tsec + "s");
+        GradientDrawable tg = new GradientDrawable();
+        tg.setCornerRadius(dp(100));
+        tg.setColor(tsec > 0 ? Ui.color(this, R.color.accent) : Ui.color(this, R.color.neutral_soft));
+        timerBtn.setBackground(tg);
+        timerBtn.setTextColor(Color.WHITE);
         boolean hdrOk = engine != null && engine.hdrAvailable && photo && !engine.isFront();
         hdrBtn.setVisibility(hdrOk ? View.VISIBLE : View.GONE);
         boolean hdrOn = Store.bool(this, "hdr", false);
@@ -671,6 +786,11 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
     }
 
     private void cycleFlash() {
+        if (engine.mode() == CameraEngine.VIDEO) {
+            engine.setTorch(!engine.torchOn());
+            refreshTop();
+            return;
+        }
         flashState = (flashState + 1) % 3;
         engine.setFlash(flashState == 0 ? ImageCapture.FLASH_MODE_OFF
                 : flashState == 1 ? ImageCapture.FLASH_MODE_AUTO : ImageCapture.FLASH_MODE_ON);
@@ -685,7 +805,7 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
     }
 
     private void switchCamera() {
-        if (busy) return;
+        if (busy || recActive || counting) return;
         engine.setFront(!engine.isFront());
         switchBtn.animate().rotationBy(180f).setDuration(280).start();
     }
@@ -719,7 +839,8 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
     }
 
     private void updateStatus() {
-        String t = nightText;
+        String t = recActive ? recText : nightText;
+        status.setTextColor(recActive ? 0xFFFF453A : Color.WHITE);
         if (t.isEmpty() && Processor.pending() > 0) t = getString(R.string.cam_processing_now);
         status.setText(t);
         status.setVisibility(t.isEmpty() ? View.GONE : View.VISIBLE);
@@ -744,7 +865,107 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
     }
 
     private void shoot() {
-        if (busy || !started) return;
+        if (!started) return;
+        if (recActive) {
+            engine.stopRecording();
+            return;
+        }
+        if (busy) return;
+        if (counting) {
+            cancelCountdown();
+            return;
+        }
+        Runnable go = engine.mode() == CameraEngine.VIDEO ? this::startVideo : this::shootNow;
+        int t = Store.num(this, "timer", 0);
+        if (t <= 0) {
+            go.run();
+            return;
+        }
+        counting = true;
+        shutter.setBusy(true);
+        tick(t, go);
+    }
+
+    private void tick(final int left, final Runnable go) {
+        if (!counting) return;
+        if (left <= 0) {
+            counting = false;
+            countView.setVisibility(View.GONE);
+            shutter.setBusy(false);
+            go.run();
+            return;
+        }
+        countView.setText(String.valueOf(left));
+        countView.setVisibility(View.VISIBLE);
+        hand.postDelayed(() -> tick(left - 1, go), 1000);
+    }
+
+    private void cancelCountdown() {
+        counting = false;
+        hand.removeCallbacksAndMessages(null);
+        countView.setVisibility(View.GONE);
+        shutter.setBusy(false);
+    }
+
+    // ---- video
+
+    private void startVideo() {
+        if (recActive || engine.mode() != CameraEngine.VIDEO) return;
+        boolean wantAudio = Store.bool(this, "vaudio", true);
+        boolean audio = wantAudio && ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+                == PackageManager.PERMISSION_GRANTED;
+        if (wantAudio && !audio) Toast.makeText(this, R.string.cam_no_audio, Toast.LENGTH_SHORT).show();
+        if (!engine.startRecording(this, audio, this::onRecEvent)) {
+            Toast.makeText(this, R.string.cam_video_failed, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        recActive = true;
+        recText = "● 00:00";
+        shutter.setRecording(true);
+        updateStatus();
+    }
+
+    private static String clock(long nanos) {
+        long s = nanos / 1_000_000_000L;
+        return String.format(Locale.US, "%02d:%02d", s / 60, s % 60);
+    }
+
+    private void onRecEvent(VideoRecordEvent e) {
+        if (e instanceof VideoRecordEvent.Status) {
+            recText = "● " + clock(((VideoRecordEvent.Status) e).getRecordingStats().getRecordedDurationNanos());
+            updateStatus();
+        } else if (e instanceof VideoRecordEvent.Finalize) {
+            VideoRecordEvent.Finalize f = (VideoRecordEvent.Finalize) e;
+            recActive = false;
+            recText = "";
+            shutter.setRecording(false);
+            updateStatus();
+            if (f.hasError() && f.getError() != VideoRecordEvent.Finalize.ERROR_DURATION_LIMIT_REACHED
+                    && f.getError() != VideoRecordEvent.Finalize.ERROR_FILE_SIZE_LIMIT_REACHED) {
+                Toast.makeText(this, f.getError() == VideoRecordEvent.Finalize.ERROR_NO_VALID_DATA
+                        ? R.string.cam_video_short : R.string.cam_video_failed, Toast.LENGTH_SHORT).show();
+                return;
+            }
+            final Uri u = f.getOutputResults().getOutputUri();
+            if (u == null) return;
+            if ("file".equals(u.getScheme()) && u.getPath() != null) {
+                MediaScannerConnection.scanFile(this, new String[]{u.getPath()}, new String[]{"video/mp4"},
+                        (path, uri) -> runOnUiThread(() -> videoSaved(uri != null ? uri : u)));
+            } else {
+                videoSaved(u);
+            }
+        }
+    }
+
+    private void videoSaved(Uri u) {
+        lastUri = u;
+        lastIsVideo = true;
+        setThumb(u);
+        Toast.makeText(this, R.string.cam_video_saved, Toast.LENGTH_SHORT).show();
+    }
+
+    private void shootNow() {
+        if (busy) return;
         if (engine.mode() == CameraEngine.NIGHT) {
             shootNight();
             return;
@@ -785,6 +1006,7 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         updateStatus();
         if (uri != null) {
             lastUri = uri;
+            lastIsVideo = false;
             setThumb(uri);
         } else {
             Toast.makeText(this, R.string.cam_save_failed, Toast.LENGTH_LONG).show();
@@ -849,7 +1071,26 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         });
     }
 
+    private Bitmap loadVideoThumb(Uri uri, int target) {
+        MediaMetadataRetriever r = new MediaMetadataRetriever();
+        try {
+            r.setDataSource(this, uri);
+            Bitmap b = r.getFrameAtTime(0);
+            if (b == null) return null;
+            float k = Math.max(1f, Math.min(b.getWidth(), b.getHeight()) / (float) target);
+            return Bitmap.createScaledBitmap(b, Math.round(b.getWidth() / k), Math.round(b.getHeight() / k), true);
+        } catch (Throwable t) {
+            return null;
+        } finally {
+            try {
+                r.release();
+            } catch (Throwable ignored) {
+            }
+        }
+    }
+
     private Bitmap loadThumb(Uri uri, int target) {
+        if (lastIsVideo) return loadVideoThumb(uri, target);
         try {
             BitmapFactory.Options o = new BitmapFactory.Options();
             o.inJustDecodeBounds = true;
@@ -883,32 +1124,40 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         }
     }
 
-    /** Finds the newest photo in DCIM/Camera so the thumbnail is right after a restart. */
+    /** Finds the newest photo or video in DCIM/Camera so the thumbnail is right after a restart. */
     private void loadLast() {
         io.execute(() -> {
             Uri found = null;
+            boolean isVid = false;
             try {
                 String sel;
                 String[] args;
+                String media = "(" + MediaStore.Files.FileColumns.MEDIA_TYPE + "=1 OR "
+                        + MediaStore.Files.FileColumns.MEDIA_TYPE + "=3)";
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    sel = MediaStore.Images.Media.RELATIVE_PATH + " LIKE ?";
+                    sel = media + " AND " + MediaStore.Images.Media.RELATIVE_PATH + " LIKE ?";
                     args = new String[]{"DCIM/Camera%"};
                 } else {
-                    sel = MediaStore.Images.Media.DATA + " LIKE ?";
+                    sel = media + " AND " + MediaStore.Images.Media.DATA + " LIKE ?";
                     args = new String[]{"%/DCIM/Camera/%"};
                 }
-                try (Cursor c = getContentResolver().query(MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                        new String[]{MediaStore.Images.Media._ID}, sel, args, MediaStore.Images.Media.DATE_ADDED + " DESC")) {
+                try (Cursor c = getContentResolver().query(MediaStore.Files.getContentUri("external"),
+                        new String[]{MediaStore.Files.FileColumns._ID, MediaStore.Files.FileColumns.MEDIA_TYPE},
+                        sel, args, MediaStore.Files.FileColumns.DATE_ADDED + " DESC")) {
                     if (c != null && c.moveToFirst()) {
-                        found = android.content.ContentUris.withAppendedId(
-                                MediaStore.Images.Media.EXTERNAL_CONTENT_URI, c.getLong(0));
+                        isVid = c.getInt(1) == 3;
+                        found = android.content.ContentUris.withAppendedId(isVid
+                                ? MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+                                : MediaStore.Images.Media.EXTERNAL_CONTENT_URI, c.getLong(0));
                     }
                 }
             } catch (Throwable ignored) {
             }
             final Uri u = found;
+            final boolean vid = isVid;
             if (u != null) runOnUiThread(() -> {
                 lastUri = u;
+                lastIsVideo = vid;
                 setThumb(u);
             });
         });
@@ -921,9 +1170,10 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
             }
             return;
         }
-        if (Semo.view(this, lastUri, "image/jpeg", Semo.ROLE_GALLERY)) return;   // the Gallery app of the same family
+        String mime = lastIsVideo ? "video/mp4" : "image/jpeg";
+        if (Semo.view(this, lastUri, mime, Semo.ROLE_GALLERY)) return;   // the Gallery app of the same family
         try {
-            startActivity(new Intent(Intent.ACTION_VIEW).setDataAndType(lastUri, "image/jpeg")
+            startActivity(new Intent(Intent.ACTION_VIEW).setDataAndType(lastUri, mime)
                     .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION));
         } catch (Exception e) {
             Toast.makeText(this, R.string.cam_no_viewer, Toast.LENGTH_SHORT).show();
@@ -1012,6 +1262,7 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
             wantHires = h;
             engine.setHires(h);
         }
+        engine.checkPrefs();
         level = Store.str(this, "level", level);
         for (TextView c : levelChips) Ui.setChip(this, c, level.equals(c.getTag()));
         refreshTop();
@@ -1021,6 +1272,8 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
 
     @Override
     protected void onPause() {
+        if (counting) cancelCountdown();
+        if (recActive) engine.stopRecording();
         if (orient != null) orient.disable();
         super.onPause();
     }
@@ -1031,12 +1284,23 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         super.onDestroy();
     }
 
+    @Override
+    public boolean onKeyDown(int keyCode, KeyEvent event) {
+        if ((keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) && started
+                && permView.getVisibility() != View.VISIBLE) {
+            if (event.getRepeatCount() == 0) shoot();
+            return true;
+        }
+        return super.onKeyDown(keyCode, event);
+    }
+
     // ================================================================== Listener
 
     @Override
     public void onBound() {
         boolean m = engine.mode() == CameraEngine.PRO;
         if (m) rebuildPro();
+        refreshModeUi();
         refreshTop();
         zoomPill.setText(zoomText(engine.zoom()));
     }
@@ -1053,6 +1317,10 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
 
     @Override
     public void onError(String message) {
+        if ("video".equals(message)) {
+            Toast.makeText(this, getString(R.string.cam_no_video_support), Toast.LENGTH_LONG).show();
+            return;
+        }
         Toast.makeText(this, getString(R.string.cam_open_failed), Toast.LENGTH_LONG).show();
     }
 
@@ -1096,7 +1364,7 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
     private static final class ShutterView extends View {
         private final Paint ring = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint disc = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private boolean night, busy;
+        private boolean night, busy, video, rec;
         private float scale = 1f;
 
         ShutterView(android.content.Context c) {
@@ -1109,6 +1377,16 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
 
         void setNight(boolean n) {
             night = n;
+            invalidate();
+        }
+
+        void setVideo(boolean v) {
+            video = v;
+            invalidate();
+        }
+
+        void setRecording(boolean r) {
+            rec = r;
             invalidate();
         }
 
@@ -1130,6 +1408,16 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
             int accent = Ui.color(getContext(), R.color.accent);
             ring.setColor(night ? accent : Color.WHITE);
             c.drawCircle(cx, cy, r - ring.getStrokeWidth() / 2f, ring);
+            if (video) {
+                disc.setColor(0xFFFF3B30);
+                if (rec) {
+                    float h = (r - Ui.dpf(getContext(), 9f)) * 0.55f;
+                    c.drawRoundRect(cx - h, cy - h, cx + h, cy + h, h * 0.3f, h * 0.3f, disc);
+                } else {
+                    c.drawCircle(cx, cy, (r - Ui.dpf(getContext(), 9f)) * scale, disc);
+                }
+                return;
+            }
             disc.setColor(busy ? (night ? accent : 0xFFD1D1D6) : Color.WHITE);
             c.drawCircle(cx, cy, (r - Ui.dpf(getContext(), 9f)) * scale, disc);
         }

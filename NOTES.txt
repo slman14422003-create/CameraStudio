@@ -1,1 +1,5 @@
 2026-10-16: CameraEngine.java:305 fixed compile error (Camera2Interop.Extender type arg ImageCapture.Builder -> ImageCapture)
+2026-10-16: added camera info (CamInfo.java): every lens with type, megapixels, sensor size, focal length, aperture, OIS, max video size; shown from the MP pill on the preview and from Settings
+2026-10-16: added Video mode: CameraX video, quality chips (4K/FHD/HD/SD by what the phone supports), stabilization, sound, torch, red record button with timer, saved to DCIM/Camera, thumbnail and gallery open for videos
+2026-10-16: added self-timer (3s / 10s) with countdown, volume keys as shutter/record, live MP / video size pill
+2026-10-16: camera-video dependency, RECORD_AUDIO permission (asked when entering video mode), new ar/en strings, settings section for video

@@ -75,4 +75,45 @@
     <string name="theme_mode_note">يطبَّق على الإعدادات؛ شاشة الكاميرا داكنة دائماً.</string>
     <string name="eco_title">منظومة Semo · المس لفتح التطبيق</string>
     <string name="eco_none">لا توجد تطبيقات Semo أخرى مثبّتة على هذا الهاتف</string>
+
+    <string name="cam_mode_video">فيديو</string>
+    <string name="cam_timer">المؤقت</string>
+    <string name="cam_info">معلومات الكاميرا</string>
+    <string name="cam_no_audio">يُسجَّل الفيديو بدون صوت (لم يُسمح بالميكروفون)</string>
+    <string name="cam_video_failed">تعذّر تسجيل الفيديو</string>
+    <string name="cam_video_short">المقطع قصير جداً</string>
+    <string name="cam_video_saved">تم حفظ الفيديو</string>
+    <string name="cam_no_video_support">هذه الكاميرا لا تدعم تسجيل الفيديو</string>
+
+    <string name="info_title">معلومات الكاميرا</string>
+    <string name="info_none">تعذّر قراءة معلومات الكاميرا</string>
+    <string name="info_t_main">رئيسية (واسعة)</string>
+    <string name="info_t_ultra">واسعة جداً</string>
+    <string name="info_t_tele">مقرِّبة</string>
+    <string name="info_t_front">أمامية</string>
+    <string name="info_t_ext">خارجية</string>
+    <string name="info_back">خلفية</string>
+    <string name="info_mp">الدقة</string>
+    <string name="info_sensor">حجم المستشعر</string>
+    <string name="info_focal">البعد البؤري</string>
+    <string name="info_aperture">فتحة العدسة</string>
+    <string name="info_ois">التثبيت البصري</string>
+    <string name="info_flash">الفلاش</string>
+    <string name="info_zoom">أقصى تقريب</string>
+    <string name="info_iso">نطاق ISO</string>
+    <string name="info_video">أعلى دقة فيديو</string>
+    <string name="info_raw">RAW</string>
+    <string name="info_level">مستوى الدعم</string>
+    <string name="info_yes">نعم</string>
+    <string name="info_no">لا</string>
+    <string name="info_mm">مم</string>
+    <string name="info_eq">مكافئ</string>
+
+    <string name="set_video">الفيديو</string>
+    <string name="set_vstab">تثبيت الفيديو</string>
+    <string name="set_vstab_sub">يقلل الاهتزاز عندما تدعمه الكاميرا</string>
+    <string name="set_vaudio">تسجيل الصوت</string>
+    <string name="set_vaudio_sub">تسجيل الصوت مع الفيديو</string>
+    <string name="set_cam_info">معلومات الكاميرا</string>
+    <string name="set_cam_info_sub">النوع والبكسلات والعدسات</string>
 </resources>

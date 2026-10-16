@@ -75,4 +75,45 @@
     <string name="theme_mode_note">Applies to Settings; the camera screen is always dark.</string>
     <string name="eco_title">Semo apps · tap to open</string>
     <string name="eco_none">No other Semo apps are installed on this phone</string>
+
+    <string name="cam_mode_video">Video</string>
+    <string name="cam_timer">Timer</string>
+    <string name="cam_info">Camera info</string>
+    <string name="cam_no_audio">Recording without sound (microphone not allowed)</string>
+    <string name="cam_video_failed">Could not record the video</string>
+    <string name="cam_video_short">The clip is too short</string>
+    <string name="cam_video_saved">Video saved</string>
+    <string name="cam_no_video_support">This camera cannot record video</string>
+
+    <string name="info_title">Camera info</string>
+    <string name="info_none">Could not read the camera info</string>
+    <string name="info_t_main">Main (wide)</string>
+    <string name="info_t_ultra">Ultra wide</string>
+    <string name="info_t_tele">Telephoto</string>
+    <string name="info_t_front">Front</string>
+    <string name="info_t_ext">External</string>
+    <string name="info_back">Back</string>
+    <string name="info_mp">Resolution</string>
+    <string name="info_sensor">Sensor size</string>
+    <string name="info_focal">Focal length</string>
+    <string name="info_aperture">Aperture</string>
+    <string name="info_ois">Optical stabilization</string>
+    <string name="info_flash">Flash</string>
+    <string name="info_zoom">Max zoom</string>
+    <string name="info_iso">ISO range</string>
+    <string name="info_video">Max video size</string>
+    <string name="info_raw">RAW</string>
+    <string name="info_level">Support level</string>
+    <string name="info_yes">Yes</string>
+    <string name="info_no">No</string>
+    <string name="info_mm">mm</string>
+    <string name="info_eq">equiv.</string>
+
+    <string name="set_video">Video</string>
+    <string name="set_vstab">Video stabilization</string>
+    <string name="set_vstab_sub">Reduces shake when the camera supports it</string>
+    <string name="set_vaudio">Record sound</string>
+    <string name="set_vaudio_sub">Record audio with the video</string>
+    <string name="set_cam_info">Camera info</string>
+    <string name="set_cam_info_sub">Type, pixels and lenses</string>
 </resources>

@@ -1,7 +1,11 @@
 package com.camera.app;
 
 import android.annotation.SuppressLint;
+import android.content.ContentValues;
 import android.content.Context;
+import android.os.Build;
+import android.os.Environment;
+import android.provider.MediaStore;
 import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraMetadata;
 import android.hardware.camera2.CaptureRequest;
@@ -28,14 +32,28 @@ import androidx.camera.core.resolutionselector.ResolutionStrategy;
 import androidx.camera.extensions.ExtensionMode;
 import androidx.camera.extensions.ExtensionsManager;
 import androidx.camera.lifecycle.ProcessCameraProvider;
+import androidx.camera.video.FileOutputOptions;
+import androidx.camera.video.MediaStoreOutputOptions;
+import androidx.camera.video.PendingRecording;
+import androidx.camera.video.Quality;
+import androidx.camera.video.QualitySelector;
+import androidx.camera.video.Recorder;
+import androidx.camera.video.Recording;
+import androidx.camera.video.VideoCapture;
+import androidx.camera.video.VideoRecordEvent;
 import androidx.camera.view.PreviewView;
 import androidx.core.content.ContextCompat;
+import androidx.core.util.Consumer;
 import androidx.lifecycle.LiveData;
 import androidx.lifecycle.Observer;
 
 import com.google.common.util.concurrent.ListenableFuture;
 
+import java.io.File;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Date;
+import java.util.Locale;
 import java.util.List;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
@@ -47,7 +65,7 @@ import java.util.concurrent.TimeUnit;
  */
 @SuppressLint("UnsafeOptInUsageError")
 final class CameraEngine {
-    static final int PHOTO = 0, NIGHT = 1, PRO = 2;
+    static final int PHOTO = 0, NIGHT = 1, PRO = 2, VIDEO = 3;
 
     interface Listener {
         /** The camera was (re)bound: capabilities below are up to date. */
@@ -67,6 +85,11 @@ final class CameraEngine {
     private ExtensionsManager ext;
     private Camera camera;
     private ImageCapture capture;
+    private VideoCapture<Recorder> videoCapture;
+    private Recorder recorder;
+    private Recording recording;
+    private boolean torch;
+    private boolean lastStab = true;
     private boolean extActive;
     private LiveData<ZoomState> zoomData;
     private Observer<ZoomState> zoomObs;
@@ -94,6 +117,12 @@ final class CameraEngine {
     boolean evSupported;
     int evMin, evMax;
     float evStep = 1f;
+    // video
+    final List<Quality> videoQualities = new ArrayList<>();
+    boolean stabSupported;
+    Quality videoQuality;
+    Size videoSize;       // chosen recording size (landscape, as the camera reports it)
+    Size photoSize;       // size of the still the bound camera will give
     private Range<Integer> nightFps;
     private boolean nrHq, edgeHq, abHq;
 
@@ -168,8 +197,10 @@ final class CameraEngine {
 
     void setMode(int m) {
         if (mode == m) return;
+        boolean wasVideo = mode == VIDEO;
         mode = m;
-        if (wantExtension() != extActive) {
+        if (wasVideo != (m == VIDEO)) torch = false;
+        if (wasVideo != (m == VIDEO) || wantExtension() != extActive) {
             bind();
         } else {
             applyFlash();
@@ -184,6 +215,115 @@ final class CameraEngine {
 
     void setTargetRotation(int surfaceRotation) {
         if (capture != null) capture.setTargetRotation(surfaceRotation);
+        if (videoCapture != null) videoCapture.setTargetRotation(surfaceRotation);
+    }
+
+    // ------------------------------------------------------------------ video
+
+    private static Quality qOf(String c) {
+        if ("uhd".equals(c)) return Quality.UHD;
+        if ("fhd".equals(c)) return Quality.FHD;
+        if ("hd".equals(c)) return Quality.HD;
+        if ("sd".equals(c)) return Quality.SD;
+        return null;
+    }
+
+    static String qCode(Quality q) {
+        if (q == Quality.UHD) return "uhd";
+        if (q == Quality.FHD) return "fhd";
+        if (q == Quality.HD) return "hd";
+        return "sd";
+    }
+
+    static String qName(Quality q) {
+        if (q == Quality.UHD) return "4K";
+        if (q == Quality.FHD) return "FHD";
+        if (q == Quality.HD) return "HD";
+        return "SD";
+    }
+
+    /** The wanted quality if the camera has it, otherwise the nearest lower one, otherwise the best it has. */
+    private Quality pickQuality() {
+        if (videoQualities.isEmpty()) return null;
+        Quality want = qOf(Store.str(act, "video_q", "fhd"));
+        Quality[] order = {Quality.UHD, Quality.FHD, Quality.HD, Quality.SD};
+        if (want != null) {
+            boolean from = false;
+            for (Quality q : order) {
+                if (q == want) from = true;
+                if (from && videoQualities.contains(q)) return q;
+            }
+        }
+        return videoQualities.get(0);
+    }
+
+    boolean isRecording() {
+        return recording != null;
+    }
+
+    boolean videoSupported() {
+        return !videoQualities.isEmpty();
+    }
+
+    /** Starts a clip into DCIM/Camera. The callback gets every recording event on the main thread. */
+    boolean startRecording(Context c, boolean audio, Consumer<VideoRecordEvent> cb) {
+        if (recorder == null || recording != null) return false;
+        try {
+            String name = "VID_" + new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date()) + ".mp4";
+            PendingRecording pr;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                ContentValues v = new ContentValues();
+                v.put(MediaStore.Video.Media.DISPLAY_NAME, name);
+                v.put(MediaStore.Video.Media.MIME_TYPE, "video/mp4");
+                v.put(MediaStore.Video.Media.RELATIVE_PATH, Environment.DIRECTORY_DCIM + "/Camera");
+                MediaStoreOutputOptions o = new MediaStoreOutputOptions.Builder(c.getContentResolver(),
+                        MediaStore.Video.Media.EXTERNAL_CONTENT_URI).setContentValues(v).build();
+                pr = recorder.prepareRecording(c, o);
+            } else {
+                File dir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM), "Camera");
+                //noinspection ResultOfMethodCallIgnored
+                dir.mkdirs();
+                FileOutputOptions o = new FileOutputOptions.Builder(new File(dir, name)).build();
+                pr = recorder.prepareRecording(c, o);
+            }
+            if (audio) pr = pr.withAudioEnabled();
+            recording = pr.start(main, cb);
+            return true;
+        } catch (Throwable t) {
+            recording = null;
+            return false;
+        }
+    }
+
+    void stopRecording() {
+        Recording r = recording;
+        recording = null;
+        if (r != null) {
+            try {
+                r.stop();
+            } catch (Throwable ignored) {
+            }
+        }
+    }
+
+    boolean torchOn() {
+        return torch;
+    }
+
+    void setTorch(boolean on) {
+        torch = on;
+        if (camera == null) return;
+        try {
+            camera.getCameraControl().enableTorch(on);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /** Re-binds when a video preference changed in Settings while the video mode is open. */
+    void checkPrefs() {
+        boolean stab = Store.bool(act, "vstab", true);
+        if (stab != lastStab && mode == VIDEO && recording == null) bind();
+        lastStab = stab;
     }
 
     private void resetManual() {
@@ -210,12 +350,22 @@ final class CameraEngine {
         nrHq = edgeHq = abHq = false;
         rawSupported = false;
         nightFps = null;
+        videoQualities.clear();
+        stabSupported = false;
         awbModes.clear();
         try {
             List<CameraInfo> infos = sel.filter(provider.getAvailableCameraInfos());
             if (infos.isEmpty()) return;
             Camera2CameraInfo c2 = Camera2CameraInfo.from(infos.get(0));
             hasFlash = infos.get(0).hasFlashUnit();
+            try {
+                videoQualities.addAll(QualitySelector.getSupportedQualities(infos.get(0)));
+            } catch (Throwable ignored) {
+            }
+            try {
+                stabSupported = Recorder.getVideoCapabilities(infos.get(0)).isStabilizationSupported();
+            } catch (Throwable ignored) {
+            }
             int[] caps = c2.getCameraCharacteristic(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES);
             Range<Integer> isoR = c2.getCameraCharacteristic(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE);
             Range<Long> expR = c2.getCameraCharacteristic(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE);
@@ -256,6 +406,7 @@ final class CameraEngine {
 
     void bind() {
         if (provider == null) return;
+        if (recording != null) stopRecording();
         try {
             provider.unbindAll();
             if (zoomData != null && zoomObs != null) zoomData.removeObserver(zoomObs);
@@ -280,38 +431,75 @@ final class CameraEngine {
             CameraSelector sel = wantExt ? ext.getExtensionEnabledCameraSelector(base, ExtensionMode.HDR) : base;
             extActive = wantExt;
 
-            // photos: 4:3, about 12 MP (the A16 bins its 50 MP sensor to 12.5 MP: sharper and much faster);
-            // "high resolution" asks CameraX for the full sensor size instead
-            ResolutionStrategy strategy = new ResolutionStrategy(
-                    hires ? new Size(8160, 6120) : new Size(4000, 3000),
-                    ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER);
-            ResolutionSelector shotRes = new ResolutionSelector.Builder()
-                    .setAspectRatioStrategy(AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY)
-                    .setResolutionStrategy(strategy)
-                    .setAllowedResolutionMode(hires ? ResolutionSelector.PREFER_HIGHER_RESOLUTION_OVER_CAPTURE_RATE
-                            : ResolutionSelector.PREFER_CAPTURE_RATE_OVER_HIGHER_RESOLUTION)
-                    .build();
-            ResolutionSelector previewRes = new ResolutionSelector.Builder()
-                    .setAspectRatioStrategy(AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY).build();
+            photoSize = null;
+            videoSize = null;
+            videoQuality = null;
+            capture = null;
+            videoCapture = null;
+            recorder = null;
+            recording = null;
 
-            Preview preview = new Preview.Builder().setResolutionSelector(previewRes).build();
-            preview.setSurfaceProvider(view.getSurfaceProvider());
+            if (mode == VIDEO) {
+                videoQuality = pickQuality();
+                ResolutionSelector previewRes = new ResolutionSelector.Builder()
+                        .setAspectRatioStrategy(AspectRatioStrategy.RATIO_16_9_FALLBACK_AUTO_STRATEGY).build();
+                Preview preview = new Preview.Builder().setResolutionSelector(previewRes).build();
+                preview.setSurfaceProvider(view.getSurfaceProvider());
+                if (videoQuality == null) {
+                    mode = PHOTO;
+                    listener.onError("video");
+                    bind();
+                    return;
+                }
+                recorder = new Recorder.Builder().setQualitySelector(QualitySelector.from(videoQuality)).build();
+                lastStab = Store.bool(act, "vstab", true);
+                VideoCapture.Builder<Recorder> vb = new VideoCapture.Builder<>(recorder);
+                if (stabSupported) vb.setVideoStabilizationEnabled(lastStab);
+                videoCapture = vb.build();
+                try {
+                    List<CameraInfo> infos = base.filter(provider.getAvailableCameraInfos());
+                    videoSize = QualitySelector.getResolution(infos.get(0), videoQuality);
+                } catch (Throwable ignored) {
+                }
+                camera = provider.bindToLifecycle(act, sel, preview, videoCapture);
+            } else {
+                // photos: 4:3, about 12 MP (the A16 bins its 50 MP sensor to 12.5 MP: sharper and much faster);
+                // "high resolution" asks CameraX for the full sensor size instead
+                ResolutionStrategy strategy = new ResolutionStrategy(
+                        hires ? new Size(8160, 6120) : new Size(4000, 3000),
+                        ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER);
+                ResolutionSelector shotRes = new ResolutionSelector.Builder()
+                        .setAspectRatioStrategy(AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY)
+                        .setResolutionStrategy(strategy)
+                        .setAllowedResolutionMode(hires ? ResolutionSelector.PREFER_HIGHER_RESOLUTION_OVER_CAPTURE_RATE
+                                : ResolutionSelector.PREFER_CAPTURE_RATE_OVER_HIGHER_RESOLUTION)
+                        .build();
+                ResolutionSelector previewRes = new ResolutionSelector.Builder()
+                        .setAspectRatioStrategy(AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY).build();
 
-            ImageCapture.Builder ib = new ImageCapture.Builder()
-                    .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
-                    .setResolutionSelector(shotRes)
-                    .setFlashMode(flashForMode());
-            if (!wantExt) {
-                Camera2Interop.Extender<ImageCapture> ex = new Camera2Interop.Extender<>(ib);
-                ex.setCaptureRequestOption(CaptureRequest.JPEG_QUALITY, (byte) 100);
-                if (nrHq) ex.setCaptureRequestOption(CaptureRequest.NOISE_REDUCTION_MODE, CameraMetadata.NOISE_REDUCTION_MODE_HIGH_QUALITY);
-                if (edgeHq) ex.setCaptureRequestOption(CaptureRequest.EDGE_MODE, CameraMetadata.EDGE_MODE_HIGH_QUALITY);
-                if (abHq) ex.setCaptureRequestOption(CaptureRequest.COLOR_CORRECTION_ABERRATION_MODE,
-                        CameraMetadata.COLOR_CORRECTION_ABERRATION_MODE_HIGH_QUALITY);
+                Preview preview = new Preview.Builder().setResolutionSelector(previewRes).build();
+                preview.setSurfaceProvider(view.getSurfaceProvider());
+
+                ImageCapture.Builder ib = new ImageCapture.Builder()
+                        .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
+                        .setResolutionSelector(shotRes)
+                        .setFlashMode(flashForMode());
+                if (!wantExt) {
+                    Camera2Interop.Extender<ImageCapture> ex = new Camera2Interop.Extender<>(ib);
+                    ex.setCaptureRequestOption(CaptureRequest.JPEG_QUALITY, (byte) 100);
+                    if (nrHq) ex.setCaptureRequestOption(CaptureRequest.NOISE_REDUCTION_MODE, CameraMetadata.NOISE_REDUCTION_MODE_HIGH_QUALITY);
+                    if (edgeHq) ex.setCaptureRequestOption(CaptureRequest.EDGE_MODE, CameraMetadata.EDGE_MODE_HIGH_QUALITY);
+                    if (abHq) ex.setCaptureRequestOption(CaptureRequest.COLOR_CORRECTION_ABERRATION_MODE,
+                            CameraMetadata.COLOR_CORRECTION_ABERRATION_MODE_HIGH_QUALITY);
+                }
+                capture = ib.build();
+
+                camera = provider.bindToLifecycle(act, sel, preview, capture);
+                try {
+                    if (capture.getResolutionInfo() != null) photoSize = capture.getResolutionInfo().getResolution();
+                } catch (Throwable ignored) {
+                }
             }
-            capture = ib.build();
-
-            camera = provider.bindToLifecycle(act, sel, preview, capture);
 
             ExposureState es = camera.getCameraInfo().getExposureState();
             evSupported = es.isExposureCompensationSupported();
@@ -326,6 +514,12 @@ final class CameraEngine {
             zoomData.observe(act, zoomObs);
 
             applyOptions();
+            if (torch && mode == VIDEO) {
+                try {
+                    camera.getCameraControl().enableTorch(true);
+                } catch (Throwable ignored) {
+                }
+            }
             listener.onBound();
         } catch (Throwable t) {
             listener.onError(String.valueOf(t.getMessage()));
