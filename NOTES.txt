@@ -1,0 +1,1 @@
+2026-10-16: CameraEngine.java:305 fixed compile error (Camera2Interop.Extender type arg ImageCapture.Builder -> ImageCapture)

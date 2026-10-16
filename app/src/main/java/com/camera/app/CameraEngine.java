@@ -302,7 +302,7 @@ final class CameraEngine {
                     .setResolutionSelector(shotRes)
                     .setFlashMode(flashForMode());
             if (!wantExt) {
-                Camera2Interop.Extender<ImageCapture.Builder> ex = new Camera2Interop.Extender<>(ib);
+                Camera2Interop.Extender<ImageCapture> ex = new Camera2Interop.Extender<>(ib);
                 ex.setCaptureRequestOption(CaptureRequest.JPEG_QUALITY, (byte) 100);
                 if (nrHq) ex.setCaptureRequestOption(CaptureRequest.NOISE_REDUCTION_MODE, CameraMetadata.NOISE_REDUCTION_MODE_HIGH_QUALITY);
                 if (edgeHq) ex.setCaptureRequestOption(CaptureRequest.EDGE_MODE, CameraMetadata.EDGE_MODE_HIGH_QUALITY);
