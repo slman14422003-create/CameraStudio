@@ -60,7 +60,7 @@
     <string name="set_jpeg">جودة ضغط JPEG</string>
     <string name="set_hires">دقة عالية (50 ميجابكسل)</string>
     <string name="set_hires_sub">أكبر حجم وأبطأ؛ الصور الكبيرة تُحفظ دون معالجة</string>
-    <string name="set_quality_note">الوضع العادي يلتقط نحو 12 ميجابكسل (دمج بكسلات المستشعر) وهو أوضح في الإضاءة الضعيفة وأسرع بكثير.</string>
+    <string name="set_quality_note">الصورة تُلتقط دائماً بأعلى دقة تدعمها الكاميرا (حتى 12 ميجابكسل في الكاميرا الرئيسية) مع تثبيت الجودة 100% من الكاميرا.</string>
     <string name="set_view">العرض</string>
     <string name="set_permissions">أذونات التطبيق</string>
     <string name="set_general">عام</string>
@@ -116,4 +116,6 @@
     <string name="set_vaudio_sub">تسجيل الصوت مع الفيديو</string>
     <string name="set_cam_info">معلومات الكاميرا</string>
     <string name="set_cam_info_sub">النوع والبكسلات والعدسات</string>
+    <string name="set_multi">دمج 3 لقطات للصورة</string>
+    <string name="set_multi_sub">ضجيج أقل وتفاصيل أوضح؛ يتوقف مع الفلاش وHDR</string>
 </resources>

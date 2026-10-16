@@ -3,3 +3,6 @@
 2026-10-16: added Video mode: CameraX video, quality chips (4K/FHD/HD/SD by what the phone supports), stabilization, sound, torch, red record button with timer, saved to DCIM/Camera, thumbnail and gallery open for videos
 2026-10-16: added self-timer (3s / 10s) with countdown, volume keys as shutter/record, live MP / video size pill
 2026-10-16: camera-video dependency, RECORD_AUDIO permission (asked when entering video mode), new ar/en strings, settings section for video
+2026-10-16: FIX photo resolution (was 1.6 MP): ImageCapture now uses HIGHEST_AVAILABLE_STRATEGY + prefer-higher-resolution, camera JPEG quality 100; old 4000x3000 / "capture rate" target removed
+2026-10-16: lens support: back lenses (ultra wide / main / tele) found from the phone's own cameras; zoom pill cycles 0.7x / 1x / 2x / 4x and switches lens automatically
+2026-10-16: photo mode merges 3 frames (native align+merge+enhance) for less noise; Settings toggle (off with flash/HDR); Pro ISO max raised to 6400 cap;

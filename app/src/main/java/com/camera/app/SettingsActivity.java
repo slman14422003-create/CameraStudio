@@ -53,9 +53,9 @@ public class SettingsActivity extends BaseActivity {
         content.addView(Ui.rowView(this, content, new Row(R.drawable.ic_image, false,
                 getString(R.string.set_jpeg), Store.num(this, "jpeg_q", 95) + "%", false, true).tint(ORANGE),
                 v -> pickJpeg()));
-        Ui.Toggle hi = Ui.toggle(this, content, R.string.set_hires, R.string.set_hires_sub,
-                Store.bool(this, "hires", false), R.drawable.ic_aspect, PINK);
-        hi.onChange((b, on) -> Store.setBool(this, "hires", on));
+        Ui.Toggle hi = Ui.toggle(this, content, R.string.set_multi, R.string.set_multi_sub,
+                Store.bool(this, "multi_photo", true), R.drawable.ic_aspect, PINK);
+        hi.onChange((b, on) -> Store.setBool(this, "multi_photo", on));
         content.addView(hi.view);
         content.addView(Ui.footer(this, getString(R.string.set_quality_note)));
 

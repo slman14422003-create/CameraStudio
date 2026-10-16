@@ -60,7 +60,7 @@
     <string name="set_jpeg">JPEG quality</string>
     <string name="set_hires">High resolution (50 MP)</string>
     <string name="set_hires_sub">Bigger and slower; large photos are saved without processing</string>
-    <string name="set_quality_note">The normal mode captures about 12 MP (sensor pixel binning): clearer in low light and much faster.</string>
+    <string name="set_quality_note">Photos are always taken at the highest resolution the camera supports (up to 12 MP on the main camera) with camera JPEG quality at 100%.</string>
     <string name="set_view">View</string>
     <string name="set_permissions">App permissions</string>
     <string name="set_general">General</string>
@@ -116,4 +116,6 @@
     <string name="set_vaudio_sub">Record audio with the video</string>
     <string name="set_cam_info">Camera info</string>
     <string name="set_cam_info_sub">Type, pixels and lenses</string>
+    <string name="set_multi">Merge 3 shots per photo</string>
+    <string name="set_multi_sub">Less noise, more detail; off with flash and HDR</string>
 </resources>

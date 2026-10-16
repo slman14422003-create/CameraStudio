@@ -18,6 +18,7 @@ import androidx.camera.camera2.interop.Camera2CameraInfo;
 import androidx.camera.camera2.interop.Camera2Interop;
 import androidx.camera.camera2.interop.CaptureRequestOptions;
 import androidx.camera.core.Camera;
+import androidx.camera.core.CameraFilter;
 import androidx.camera.core.CameraInfo;
 import androidx.camera.core.CameraSelector;
 import androidx.camera.core.ExposureState;
@@ -117,6 +118,21 @@ final class CameraEngine {
     boolean evSupported;
     int evMin, evMax;
     float evStep = 1f;
+    // back lenses (ultra wide / main / tele) that CameraX exposes as separate cameras
+    static final class Lens {
+        final String id;
+        final float eq;       // 35 mm equivalent focal length
+        float factor = 1f;    // zoom factor relative to the main lens (0.6 = ultra wide)
+
+        Lens(String id, float eq) {
+            this.id = id;
+            this.eq = eq;
+        }
+    }
+
+    final List<Lens> lenses = new ArrayList<>();
+    private String lensId;
+
     // video
     final List<Quality> videoQualities = new ArrayList<>();
     boolean stabSupported;
@@ -333,7 +349,73 @@ final class CameraEngine {
     }
 
     private boolean wantExtension() {
-        return hdr && mode == PHOTO && ext != null && hdrAvailable && !front;
+        return hdr && mode == PHOTO && ext != null && hdrAvailable && !front && isMainLens();
+    }
+
+    // ------------------------------------------------------------------ lenses
+
+    private boolean isMainLens() {
+        return lensId == null || lenses.isEmpty() || Math.abs(currentFactor() - 1f) < 0.05f;
+    }
+
+    private float currentFactor() {
+        for (Lens l : lenses) if (l.id.equals(lensId == null ? lenses.get(0).id : lensId)) return l.factor;
+        return 1f;
+    }
+
+    /** Zoom factor of the lens in use relative to the main lens (so 0.6 shows for the ultra wide camera). */
+    float lensFactor() {
+        return front ? 1f : currentFactor();
+    }
+
+    String lensId() {
+        return lensId;
+    }
+
+    void setLens(String id) {
+        if (id == null ? lensId == null : id.equals(lensId)) return;
+        lensId = id;
+        resetManual();
+        bind();
+    }
+
+    private void findLenses(CameraSelector base) {
+        lenses.clear();
+        if (front) return;
+        try {
+            for (CameraInfo ci : base.filter(provider.getAvailableCameraInfos())) {
+                Camera2CameraInfo c2 = Camera2CameraInfo.from(ci);
+                float[] fl = c2.getCameraCharacteristic(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS);
+                android.util.SizeF mm = c2.getCameraCharacteristic(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE);
+                if (fl == null || fl.length == 0 || mm == null || mm.getWidth() <= 0) continue;
+                float eq = (float) (fl[0] * 43.2666 / Math.hypot(mm.getWidth(), mm.getHeight()));
+                lenses.add(new Lens(c2.getCameraId(), eq));
+            }
+        } catch (Throwable ignored) {
+        }
+        if (lenses.isEmpty()) return;
+        float ref = lenses.get(0).eq;
+        for (Lens l : lenses) l.factor = Math.round(l.eq / ref * 10f) / 10f;
+        boolean ok = false;
+        for (Lens l : lenses) if (l.id.equals(lensId)) ok = true;
+        if (!ok) lensId = null;
+    }
+
+    private CameraSelector lensSelector(CameraSelector base) {
+        if (front || lensId == null || lenses.size() < 2) return base;
+        final String id = lensId;
+        return new CameraSelector.Builder()
+                .requireLensFacing(CameraSelector.LENS_FACING_BACK)
+                .addCameraFilter((CameraFilter) infos -> {
+                    List<CameraInfo> out = new ArrayList<>();
+                    for (CameraInfo i : infos) {
+                        try {
+                            if (id.equals(Camera2CameraInfo.from(i).getCameraId())) out.add(i);
+                        } catch (Throwable ignored) {
+                        }
+                    }
+                    return out.isEmpty() ? infos : out;
+                }).build();
     }
 
     // ------------------------------------------------------------------ binding
@@ -374,7 +456,7 @@ final class CameraEngine {
             rawSupported = has(caps, CameraMetadata.REQUEST_AVAILABLE_CAPABILITIES_RAW);
             if (isoR != null) {
                 isoMin = isoR.getLower();
-                isoMax = Math.min(isoR.getUpper(), 3200);
+                isoMax = Math.min(isoR.getUpper(), 6400);
             }
             if (expR != null) {
                 expMin = Math.max(expR.getLower(), 250_000L);          // 1/4000 s
@@ -421,14 +503,16 @@ final class CameraEngine {
                     return;
                 }
             }
-            readCaps(base);
+            findLenses(base);
+            CameraSelector lens = lensSelector(base);
+            readCaps(lens);
             hdrAvailable = false;
             try {
                 hdrAvailable = ext != null && ext.isExtensionAvailable(base, ExtensionMode.HDR);
             } catch (Throwable ignored) {
             }
             boolean wantExt = wantExtension();
-            CameraSelector sel = wantExt ? ext.getExtensionEnabledCameraSelector(base, ExtensionMode.HDR) : base;
+            CameraSelector sel = wantExt ? ext.getExtensionEnabledCameraSelector(base, ExtensionMode.HDR) : lens;
             extActive = wantExt;
 
             photoSize = null;
@@ -457,7 +541,7 @@ final class CameraEngine {
                 if (stabSupported) vb.setVideoStabilizationEnabled(lastStab);
                 videoCapture = vb.build();
                 try {
-                    List<CameraInfo> infos = base.filter(provider.getAvailableCameraInfos());
+                    List<CameraInfo> infos = lens.filter(provider.getAvailableCameraInfos());
                     videoSize = QualitySelector.getResolution(infos.get(0), videoQuality);
                 } catch (Throwable ignored) {
                 }
@@ -465,14 +549,12 @@ final class CameraEngine {
             } else {
                 // photos: 4:3, about 12 MP (the A16 bins its 50 MP sensor to 12.5 MP: sharper and much faster);
                 // "high resolution" asks CameraX for the full sensor size instead
-                ResolutionStrategy strategy = new ResolutionStrategy(
-                        hires ? new Size(8160, 6120) : new Size(4000, 3000),
-                        ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER);
+                // always the biggest 4:3 picture the camera can give (the old 4000x3000 target + "capture rate"
+                // preference made CameraX fall back to about 1.6 MP on this kind of phone)
                 ResolutionSelector shotRes = new ResolutionSelector.Builder()
                         .setAspectRatioStrategy(AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY)
-                        .setResolutionStrategy(strategy)
-                        .setAllowedResolutionMode(hires ? ResolutionSelector.PREFER_HIGHER_RESOLUTION_OVER_CAPTURE_RATE
-                                : ResolutionSelector.PREFER_CAPTURE_RATE_OVER_HIGHER_RESOLUTION)
+                        .setResolutionStrategy(ResolutionStrategy.HIGHEST_AVAILABLE_STRATEGY)
+                        .setAllowedResolutionMode(ResolutionSelector.PREFER_HIGHER_RESOLUTION_OVER_CAPTURE_RATE)
                         .build();
                 ResolutionSelector previewRes = new ResolutionSelector.Builder()
                         .setAspectRatioStrategy(AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY).build();
@@ -482,6 +564,7 @@ final class CameraEngine {
 
                 ImageCapture.Builder ib = new ImageCapture.Builder()
                         .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
+                        .setJpegQuality(100)
                         .setResolutionSelector(shotRes)
                         .setFlashMode(flashForMode());
                 if (!wantExt) {

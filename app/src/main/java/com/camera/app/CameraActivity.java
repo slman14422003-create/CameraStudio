@@ -76,7 +76,8 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
     private TextView status, zoomPill, hdrBtn, timerBtn, infoPill, countView;
     private LinearLayout videoRow;
     private final List<TextView> videoChips = new ArrayList<>();
-    private boolean recActive, counting, lastIsVideo;
+    private boolean recActive, counting, lastIsVideo, multiShot;
+    private float pendingStop = -1f;
     private String recText = "";
     private final Handler hand = new Handler(Looper.getMainLooper());
     private ImageButton flashBtn, gridBtn, switchBtn;
@@ -811,17 +812,50 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
     }
 
     private void cycleZoom() {
-        float min = engine.zoomMin(), max = engine.zoomMax(), cur = engine.zoom();
-        float[] steps = {0.6f, 1f, 2f, 5f};
-        float next = -1f;
-        for (float s : steps) {
-            if (s >= min - 0.01f && s <= max + 0.01f && s > cur + 0.05f) {
+        if (engine.isFront() || engine.lenses.size() < 2) {
+            float min = engine.zoomMin(), max = engine.zoomMax(), cur = engine.zoom();
+            float[] steps = {0.6f, 1f, 2f, 5f};
+            float next = -1f;
+            for (float s : steps) {
+                if (s >= min - 0.01f && s <= max + 0.01f && s > cur + 0.05f) {
+                    next = s;
+                    break;
+                }
+            }
+            if (next < 0f) next = Math.max(min, 1f);
+            engine.setZoom(next);
+            return;
+        }
+        // several back lenses: stops on the "1x = main lens" scale, each one served by the best lens for it
+        List<Float> stops = new ArrayList<>();
+        for (CameraEngine.Lens l : engine.lenses) if (!stops.contains(l.factor)) stops.add(l.factor);
+        for (float s : new float[]{1f, 2f, 4f}) if (!stops.contains(s)) stops.add(s);
+        java.util.Collections.sort(stops);
+        float cur = engine.zoom() * engine.lensFactor();
+        float next = stops.get(0);
+        for (float s : stops) {
+            if (s > cur + 0.08f) {
                 next = s;
                 break;
             }
         }
-        if (next < 0f) next = Math.max(min, 1f);
-        engine.setZoom(next);
+        goToStop(next);
+    }
+
+    private void goToStop(float stop) {
+        CameraEngine.Lens best = engine.lenses.get(0);
+        for (CameraEngine.Lens l : engine.lenses) if (l.factor <= stop * 1.05f && l.factor >= best.factor) best = l;
+        if (stop < best.factor) {
+            for (CameraEngine.Lens l : engine.lenses) if (l.factor < best.factor) best = l;
+        }
+        float ratio = Math.max(1f, stop / best.factor);
+        boolean sameLens = best.id.equals(engine.lensId()) || (engine.lensId() == null && best == engine.lenses.get(0));
+        if (sameLens) {
+            engine.setZoom(ratio);
+        } else {
+            pendingStop = ratio;
+            engine.setLens(best == engine.lenses.get(0) ? null : best.id);
+        }
     }
 
     private void showFocus(float x, float y) {
@@ -966,6 +1000,16 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
 
     private void shootNow() {
         if (busy) return;
+        if (engine.mode() == CameraEngine.PHOTO && Store.bool(this, "multi_photo", true) && flashState == 0
+                && !Store.bool(this, "hdr", false) && Native.LOADED && !Levels.OFF.equals(level)) {
+            multiShot = true;
+            busy = true;
+            shutter.setBusy(true);
+            flashEffect();
+            nextFrame(0, 3, new ArrayList<>(), new int[]{0});
+            return;
+        }
+        multiShot = false;
         if (engine.mode() == CameraEngine.NIGHT) {
             shootNight();
             return;
@@ -1053,7 +1097,12 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         nightText = "";
         busy = false;
         shutter.setBusy(false);
-        Processor.night(this, frames, rot, quality(), done);
+        if (multiShot) {
+            multiShot = false;
+            Processor.night(this, frames, rot, quality(), Levels.params(level), done);
+        } else {
+            Processor.night(this, frames, rot, quality(), done);
+        }
         updateStatus();
     }
 
@@ -1302,7 +1351,12 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         if (m) rebuildPro();
         refreshModeUi();
         refreshTop();
-        zoomPill.setText(zoomText(engine.zoom()));
+        zoomPill.setText(zoomText(engine.zoom() * engine.lensFactor()));
+        if (pendingStop > 0f) {
+            float z = pendingStop;
+            pendingStop = -1f;
+            engine.setZoom(z);
+        }
     }
 
     private static String zoomText(float z) {
@@ -1312,7 +1366,7 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
 
     @Override
     public void onZoom(float ratio) {
-        zoomPill.setText(zoomText(ratio));
+        zoomPill.setText(zoomText(ratio * engine.lensFactor()));
     }
 
     @Override

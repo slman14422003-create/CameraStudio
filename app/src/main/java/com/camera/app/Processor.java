@@ -80,6 +80,11 @@ final class Processor {
 
     /** Night mode: align and merge the frames, then lift tones and detail. */
     static void night(Context ctx, List<byte[]> frames, int rotation, int quality, Done d) {
+        night(ctx, frames, rotation, quality, null, d);
+    }
+
+    /** {@code params} (denoise, clahe, sharpen, awb, gamma) after the merge; null uses the night preset. */
+    static void night(Context ctx, List<byte[]> frames, int rotation, int quality, final float[] params, Done d) {
         final Context app = ctx.getApplicationContext();
         PENDING.incrementAndGet();
         EXEC.execute(() -> {
@@ -106,7 +111,7 @@ final class Processor {
                     f.recycle();
                 }
                 Native.mergeEnd(handle, base);
-                float[] p = Levels.night();
+                float[] p = params != null ? params : Levels.night();
                 Native.enhance(base, p[0], p[1], p[2], p[3], p[4]);
                 byte[] out = encode(base, quality);
                 uri = Saver.saveJpeg(app, out, first, rotation, w, h);
