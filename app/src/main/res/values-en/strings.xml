@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Camera Studio</string>
+    <string name="back">Back</string>
+    <string name="delete">Delete</string>
+    <string name="ok">OK</string>
+    <string name="refresh">Refresh</string>
+    <string name="close">Close</string>
+    <string name="lang_ar">العربية</string>
+    <string name="lang_en">English</string>
+    <string name="lang_system">System language</string>
+    <string name="crash_title">The app stopped last time</string>
+    <string name="crash_copy">Copy report</string>
+
+    <string name="cam_flash">Flash</string>
+    <string name="cam_grid">Composition grid</string>
+    <string name="cam_processing">Processing</string>
+    <string name="cam_processing_now">Enhancing photo…</string>
+    <string name="cam_open_gallery">Open Gallery</string>
+    <string name="cam_shutter">Capture</string>
+    <string name="cam_switch">Switch camera</string>
+    <string name="cam_mode_photo">Photo</string>
+    <string name="cam_mode_night">Night</string>
+    <string name="cam_mode_pro">Pro</string>
+    <string name="cam_perm_title">The camera needs your permission</string>
+    <string name="cam_perm_msg">Camera access is needed to show and capture the picture. Photos are saved to the Gallery (DCIM/Camera) and nothing leaves the phone.</string>
+    <string name="cam_grant">Allow camera</string>
+    <string name="cam_error">Could not take the photo</string>
+    <string name="cam_save_failed">Could not save the photo</string>
+    <string name="cam_night_hold">Hold still… %1$d/%2$d</string>
+    <string name="cam_no_photo">No photos yet</string>
+    <string name="cam_no_viewer">No app can show the photo</string>
+    <string name="cam_open_failed">Could not open the camera</string>
+
+    <string name="lvl_off">Off</string>
+    <string name="lvl_light">Light</string>
+    <string name="lvl_medium">Medium</string>
+    <string name="lvl_strong">Strong</string>
+
+    <string name="pro_auto">Auto</string>
+    <string name="pro_iso">ISO</string>
+    <string name="pro_shutter">Shutter</string>
+    <string name="pro_wb">White balance</string>
+    <string name="pro_focus">Focus</string>
+    <string name="pro_ev">Exposure</string>
+    <string name="wb_auto">Auto</string>
+    <string name="wb_incandescent">Incandescent</string>
+    <string name="wb_fluorescent">Fluorescent</string>
+    <string name="wb_daylight">Daylight</string>
+    <string name="wb_cloudy">Cloudy</string>
+    <string name="wb_shade">Shade</string>
+
+    <string name="settings">Settings</string>
+    <string name="settings_sub">Photo quality, processing, appearance and language</string>
+    <string name="set_quality">Photo quality</string>
+    <string name="set_level">Processing level</string>
+    <string name="set_level_note">Applied after every shot: noise reduction, local contrast, sharpening, white balance and adaptive gamma. “Off” saves the camera’s own JPEG untouched.</string>
+    <string name="set_night_frames">Night mode frames</string>
+    <string name="set_frames_n">%1$d frames</string>
+    <string name="set_jpeg">JPEG quality</string>
+    <string name="set_hires">High resolution (50 MP)</string>
+    <string name="set_hires_sub">Bigger and slower; large photos are saved without processing</string>
+    <string name="set_quality_note">The normal mode captures about 12 MP (sensor pixel binning): clearer in low light and much faster.</string>
+    <string name="set_view">View</string>
+    <string name="set_permissions">App permissions</string>
+    <string name="set_general">General</string>
+    <string name="set_language">Language</string>
+    <string name="set_about">About</string>
+    <string name="set_version">Version %1$s</string>
+    <string name="about_text">Camera Studio · works offline and saves photos to DCIM/Camera so they show up in the Gallery app right away.</string>
+    <string name="theme_title">Appearance</string>
+    <string name="theme_light">Day</string>
+    <string name="theme_dark">Dark (Black)</string>
+    <string name="theme_auto">Automatic (System)</string>
+    <string name="theme_mode_note">Applies to Settings; the camera screen is always dark.</string>
+    <string name="eco_title">Semo apps · tap to open</string>
+    <string name="eco_none">No other Semo apps are installed on this phone</string>
+</resources>

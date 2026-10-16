@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Accent family (iOS blue) -->
+    <attr name="cAccent" format="color" />
+    <attr name="cAccentText" format="color" />
+    <attr name="cAccentSoft" format="color" />
+    <attr name="cBrandStart" format="color" />
+    <attr name="cBrandMid" format="color" />
+    <attr name="cBrandEnd" format="color" />
+
+    <!-- Neutral family: surfaces, strokes and text. Day / night values come from colors.xml -->
+    <attr name="cBg" format="color" />
+    <attr name="cGroupBg" format="color" />
+    <attr name="cSurface" format="color" />
+    <attr name="cSurfaceHigh" format="color" />
+    <attr name="cField" format="color" />
+    <attr name="cStroke" format="color" />
+    <attr name="cStrokeSoft" format="color" />
+    <attr name="cTextPrimary" format="color" />
+    <attr name="cTextSecondary" format="color" />
+    <attr name="cTextHint" format="color" />
+    <attr name="cNeutralSoft" format="color" />
+</resources>

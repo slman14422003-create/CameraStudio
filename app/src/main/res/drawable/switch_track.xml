@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- iOS switch: 51 x 31, green when on -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_checked="true">
+        <shape android:shape="rectangle">
+            <solid android:color="@color/ok" />
+            <size android:width="51dp" android:height="31dp" />
+            <corners android:radius="16dp" />
+        </shape>
+    </item>
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="?attr/cSurfaceHigh" />
+            <size android:width="51dp" android:height="31dp" />
+            <corners android:radius="16dp" />
+        </shape>
+    </item>
+</selector>

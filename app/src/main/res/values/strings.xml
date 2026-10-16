@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">كاميرا ستوديو</string>
+    <string name="back">رجوع</string>
+    <string name="delete">حذف</string>
+    <string name="ok">موافق</string>
+    <string name="refresh">تحديث</string>
+    <string name="close">إغلاق</string>
+    <string name="lang_ar">العربية</string>
+    <string name="lang_en">English</string>
+    <string name="lang_system">لغة النظام</string>
+    <string name="crash_title">توقف التطبيق في المرة السابقة</string>
+    <string name="crash_copy">نسخ التقرير</string>
+
+    <string name="cam_flash">الفلاش</string>
+    <string name="cam_grid">شبكة التكوين</string>
+    <string name="cam_processing">المعالجة</string>
+    <string name="cam_processing_now">جارٍ تحسين الصورة…</string>
+    <string name="cam_open_gallery">فتح المعرض</string>
+    <string name="cam_shutter">التقاط</string>
+    <string name="cam_switch">تبديل الكاميرا</string>
+    <string name="cam_mode_photo">صورة</string>
+    <string name="cam_mode_night">ليلي</string>
+    <string name="cam_mode_pro">احترافي</string>
+    <string name="cam_perm_title">الكاميرا تحتاج إذنك</string>
+    <string name="cam_perm_msg">يلزم إذن الكاميرا لعرض الصورة والتقاطها. تُحفظ الصور في المعرض (DCIM/Camera) ولا يُرسل أي شيء خارج الهاتف.</string>
+    <string name="cam_grant">السماح بالكاميرا</string>
+    <string name="cam_error">تعذّر التقاط الصورة</string>
+    <string name="cam_save_failed">تعذّر حفظ الصورة</string>
+    <string name="cam_night_hold">ثبّت الهاتف… %1$d/%2$d</string>
+    <string name="cam_no_photo">لا توجد صور بعد</string>
+    <string name="cam_no_viewer">لا يوجد تطبيق لعرض الصورة</string>
+    <string name="cam_open_failed">تعذّر فتح الكاميرا</string>
+
+    <string name="lvl_off">إيقاف</string>
+    <string name="lvl_light">خفيفة</string>
+    <string name="lvl_medium">متوسطة</string>
+    <string name="lvl_strong">قوية</string>
+
+    <string name="pro_auto">تلقائي</string>
+    <string name="pro_iso">ISO</string>
+    <string name="pro_shutter">الغالق</string>
+    <string name="pro_wb">توازن الأبيض</string>
+    <string name="pro_focus">التركيز</string>
+    <string name="pro_ev">التعريض</string>
+    <string name="wb_auto">تلقائي</string>
+    <string name="wb_incandescent">متوهج</string>
+    <string name="wb_fluorescent">فلورسنت</string>
+    <string name="wb_daylight">نهار</string>
+    <string name="wb_cloudy">غائم</string>
+    <string name="wb_shade">ظل</string>
+
+    <string name="settings">الإعدادات</string>
+    <string name="settings_sub">جودة الصور والمعالجة والمظهر واللغة</string>
+    <string name="set_quality">جودة الصورة</string>
+    <string name="set_level">مستوى المعالجة</string>
+    <string name="set_level_note">تُطبَّق بعد كل لقطة: إزالة الضجيج، تباين محلي، حدّة، توازن أبيض وغاما تكيفية. «إيقاف» يحفظ صورة الكاميرا كما هي.</string>
+    <string name="set_night_frames">إطارات الوضع الليلي</string>
+    <string name="set_frames_n">%1$d إطارات</string>
+    <string name="set_jpeg">جودة ضغط JPEG</string>
+    <string name="set_hires">دقة عالية (50 ميجابكسل)</string>
+    <string name="set_hires_sub">أكبر حجم وأبطأ؛ الصور الكبيرة تُحفظ دون معالجة</string>
+    <string name="set_quality_note">الوضع العادي يلتقط نحو 12 ميجابكسل (دمج بكسلات المستشعر) وهو أوضح في الإضاءة الضعيفة وأسرع بكثير.</string>
+    <string name="set_view">العرض</string>
+    <string name="set_permissions">أذونات التطبيق</string>
+    <string name="set_general">عام</string>
+    <string name="set_language">اللغة</string>
+    <string name="set_about">حول التطبيق</string>
+    <string name="set_version">الإصدار %1$s</string>
+    <string name="about_text">كاميرا ستوديو · تعمل بدون إنترنت، وتحفظ الصور في DCIM/Camera لتظهر فوراً في تطبيق المعرض.</string>
+    <string name="theme_title">المظهر</string>
+    <string name="theme_light">نهاري</string>
+    <string name="theme_dark">ليلي (أسود)</string>
+    <string name="theme_auto">تلقائي (النظام)</string>
+    <string name="theme_mode_note">يطبَّق على الإعدادات؛ شاشة الكاميرا داكنة دائماً.</string>
+    <string name="eco_title">منظومة Semo · المس لفتح التطبيق</string>
+    <string name="eco_none">لا توجد تطبيقات Semo أخرى مثبّتة على هذا الهاتف</string>
+</resources>

@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- iOS large-title header: big bold title on the left, round glass buttons on the right -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:gravity="center_vertical"
+    android:minHeight="64dp"
+    android:orientation="horizontal"
+    android:paddingStart="16dp"
+    android:paddingTop="8dp"
+    android:paddingEnd="16dp"
+    android:paddingBottom="6dp">
+
+    <ImageButton
+        android:id="@+id/btnBack"
+        style="@style/IconButton"
+        android:layout_marginEnd="8dp"
+        android:contentDescription="@string/back"
+        android:src="@drawable/ic_back" />
+
+    <ImageView
+        android:id="@+id/headerIcon"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:importantForAccessibility="no"
+        android:visibility="gone" />
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:gravity="start"
+        android:orientation="vertical"
+        android:paddingEnd="8dp">
+
+        <TextView
+            android:id="@+id/title"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:fontFamily="sans-serif"
+            android:gravity="start"
+            android:maxLines="1"
+            android:textAlignment="viewStart"
+            android:textColor="?attr/cTextPrimary"
+            android:textSize="32sp"
+            android:textStyle="bold"
+            app:autoSizeMaxTextSize="32sp"
+            app:autoSizeMinTextSize="18sp"
+            app:autoSizeStepGranularity="1sp"
+            app:autoSizeTextType="uniform" />
+
+        <TextView
+            android:id="@+id/subtitle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:ellipsize="middle"
+            android:gravity="start"
+            android:singleLine="true"
+            android:textAlignment="viewStart"
+            android:textColor="?attr/cTextSecondary"
+            android:textSize="13sp" />
+    </LinearLayout>
+
+    <ImageButton
+        android:id="@+id/btnA1"
+        style="@style/IconButton"
+        android:layout_marginStart="8dp"
+        android:visibility="gone" />
+
+    <ImageButton
+        android:id="@+id/btnA2"
+        style="@style/IconButton"
+        android:layout_marginStart="8dp"
+        android:visibility="gone" />
+
+    <ImageButton
+        android:id="@+id/btnRefresh"
+        style="@style/IconButton"
+        android:layout_marginStart="8dp"
+        android:contentDescription="@string/refresh"
+        android:src="@drawable/ic_refresh" />
+</LinearLayout>

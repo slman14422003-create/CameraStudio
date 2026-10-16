@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <item name="tag_insets" type="id" />
+    <item name="tag_shape" type="id" />
+    <item name="album_cover" type="id" />
+    <item name="album_kind" type="id" />
+    <item name="album_name" type="id" />
+    <item name="album_count" type="id" />
+</resources>

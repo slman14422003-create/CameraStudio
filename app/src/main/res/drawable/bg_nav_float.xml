@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- iOS floating tab bar: capsule, system surface colour, hairline edge -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="?attr/cSurface" />
+    <stroke android:width="0.5dp" android:color="?attr/cStroke" />
+    <corners android:radius="100dp" />
+</shape>

@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- DAY palette: iOS system colours (white, grouped grey #F2F2F7, iOS blue). Night counterpart: values-night/colors.xml (pure AMOLED black). -->
+    <color name="bg">#FFFFFF</color>
+    <color name="bg_group">#F2F2F7</color>
+    <color name="surface">#FFFFFF</color>
+    <color name="surface_high">#E5E5EA</color>
+    <color name="field">#F2F2F7</color>
+    <color name="stroke">#C6C6C8</color>
+    <color name="stroke_soft">#E5E5EA</color>
+    <color name="text_primary">#000000</color>
+    <color name="text_secondary">#6C6C70</color>
+    <color name="text_hint">#AEAEB2</color>
+    <color name="accent">#007AFF</color>
+    <color name="accent_text">#007AFF</color>
+    <color name="accent_soft">#E5F1FF</color>
+    <color name="neutral_soft">#E9E9EB</color>
+    <color name="on_accent">#FFFFFF</color>
+    <color name="ripple">#12000000</color>
+    <color name="ripple_on_accent">#22000000</color>
+    <color name="brand_start">#007AFF</color>
+    <color name="brand_mid">#007AFF</color>
+    <color name="brand_end">#007AFF</color>
+    <color name="ok">#34C759</color>
+    <color name="bad">#FF3B30</color>
+    <color name="ic_launcher_bg">#F7FAFF</color>
+</resources>

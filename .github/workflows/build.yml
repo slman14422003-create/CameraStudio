@@ -1,0 +1,235 @@
+name: Build APK
+
+on:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+    paths-ignore: ['**/*.md']
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: 'نوع البناء'
+        type: choice
+        options: [release, debug]
+        default: release
+      version:
+        description: 'رقم الإصدار / الوسم (مثال v1.1) — اتركه فارغًا للترقيم التلقائي'
+        type: string
+        default: ''
+      publish_release:
+        description: 'انشر الناتج كإصدار (Release) على GitHub'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') && github.event_name != 'workflow_dispatch' }}
+
+env:
+  BUILD_TYPE: ${{ inputs.build_type || 'release' }}
+
+jobs:
+  build:
+    name: Build ${{ inputs.build_type || 'release' }} APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      publish: ${{ steps.meta.outputs.publish }}
+      code: ${{ steps.meta.outputs.code }}
+      permanent: ${{ steps.sign.outputs.permanent }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: meta
+        env:
+          IN_VERSION: ${{ inputs.version }}
+          IN_PUBLISH: ${{ inputs.publish_release }}
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+        run: |
+          BASE="$(grep -oP 'versionName\s*=\s*System\.getenv\([^)]*\)\s*\?:\s*"\K[^"]+' app/build.gradle | head -n1)"
+          [ -z "$BASE" ] && BASE="1.0"
+          PUBLISH=false
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF_NAME}"; PUBLISH=true
+          elif [ -n "$IN_VERSION" ]; then
+            TAG="$IN_VERSION"; [[ "$TAG" != v* ]] && TAG="v$TAG"
+          else
+            TAG="v${BASE}.${GITHUB_RUN_NUMBER}"
+          fi
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            PUBLISH="${IN_PUBLISH:-true}"
+          elif [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            PUBLISH=true
+            # put [skip release] in a commit message to build without publishing a Release
+            case "$COMMIT_MSG" in *"[skip release]"*|*"[no release]"*) PUBLISH=false ;; esac
+          fi
+          if [ "$BUILD_TYPE" != "release" ] || [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then PUBLISH=false; fi
+          {
+            echo "tag=$TAG"
+            echo "publish=$PUBLISH"
+            echo "code=$((10 + GITHUB_RUN_NUMBER))"
+          } >> "$GITHUB_OUTPUT"
+          echo "APP_VERSION_NAME=${TAG#v}" >> "$GITHUB_ENV"
+          echo "VERSION_CODE_OVERRIDE=$((10 + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
+
+      - name: Security guard (the camera never touches the network)
+        run: |
+          SRC=app/src/main/java
+          M=app/src/main/AndroidManifest.xml
+          if grep -rEn "java\.net\.|HttpURLConnection|okhttp|android\.net\.http" $SRC; then
+            echo "::error::network code is not allowed in the camera app"; exit 1; fi
+          if grep -q "android.permission.INTERNET" $M; then echo "::error::INTERNET permission is not allowed"; exit 1; fi
+          grep -q 'android:allowBackup="false"' $M || { echo "::error::backup must stay disabled"; exit 1; }
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Android SDK (API 36)
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platforms;android-36 build-tools;36.0.0 ndk;28.0.12433566 cmake;3.22.1'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.14.3'
+
+      # Permanent signing key. Without the secrets the APK gets a throw-away debug key that is different on
+      # every CI run, so Android refuses to update one build with the next ("signature does not match").
+      # Such a build is still produced as an artifact, but it is never published as a Release (see the last step).
+      - name: Prepare release signing
+        id: sign
+        if: env.BUILD_TYPE == 'release'
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          # accept STORE_PASSWORD too (that is the name used inside signing-info.txt) and fall back to KEY_PASSWORD
+          STORE_PASS="${KEYSTORE_PASSWORD:-${STORE_PASSWORD:-$KEY_PASSWORD}}"
+          ALIAS="${KEY_ALIAS:-camera}"
+          MISSING=""
+          [ -z "$KEYSTORE_BASE64" ] && MISSING="$MISSING KEYSTORE_BASE64"
+          [ -z "$STORE_PASS" ] && MISSING="$MISSING KEYSTORE_PASSWORD"
+          if [ -n "$MISSING" ]; then
+            echo "::warning title=بدون مفتاح توقيع دائم::الأسرار الناقصة أو الفارغة:$MISSING . أضفها في Settings > Secrets and variables > Actions > تبويب Repository secrets (وليس Environment ولا Dependabot). راجع SIGNING.md."
+            echo "SIGNING_MODE=مفتاح تجريبي (debug)" >> "$GITHUB_ENV"
+            echo "permanent=false" >> "$GITHUB_OUTPUT"
+            echo "missing=$MISSING" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "$KEYSTORE_BASE64" | tr -d '[:space:]' | base64 -d > "$RUNNER_TEMP/release.jks"
+          echo "::add-mask::$STORE_PASS"
+          [ -n "$KEY_PASSWORD" ] && echo "::add-mask::$KEY_PASSWORD"
+          # fail early with a clear message if the password / alias do not open the keystore
+          if ! keytool -list -keystore "$RUNNER_TEMP/release.jks" -storepass "$STORE_PASS" -alias "$ALIAS" >/dev/null 2>&1; then
+            echo "::error title=مفتاح التوقيع غير صالح::تعذّر فتح المفتاح. تأكد أن KEYSTORE_BASE64 هو كل محتوى KEYSTORE_BASE64.txt بدون اقتباسات، وأن كلمة المرور والـ alias ($ALIAS) صحيحان."
+            exit 1
+          fi
+          {
+            echo "SIGNING_STORE_FILE=$RUNNER_TEMP/release.jks"
+            echo "SIGNING_STORE_PASSWORD=$STORE_PASS"
+            echo "SIGNING_KEY_ALIAS=$ALIAS"
+            echo "SIGNING_KEY_PASSWORD=${KEY_PASSWORD:-$STORE_PASS}"
+            echo "SIGNING_MODE=مفتاح المستودع الدائم"
+          } >> "$GITHUB_ENV"
+          echo "permanent=true" >> "$GITHUB_OUTPUT"
+
+      - name: Build APK
+        env:
+          UPDATE_REPO: ${{ github.repository }}
+        run: |
+          if [ "$BUILD_TYPE" = "release" ]; then
+            gradle assembleRelease --stacktrace
+          else
+            gradle assembleDebug --stacktrace
+          fi
+
+      - name: Collect APK
+        env:
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          APK_SRC="$(ls app/build/outputs/apk/${BUILD_TYPE}/*.apk | head -n1)"
+          mkdir -p dist
+          APK="dist/Camera-${TAG}-${BUILD_TYPE}.apk"
+          cp "$APK_SRC" "$APK"
+          APKSIGNER="$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -n1)"
+          "$APKSIGNER" verify --verbose --print-certs "$APK"
+          {
+            echo "## ✅ Camera Studio — $BUILD_TYPE"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| الإصدار | \`$TAG\` |"
+            echo "| الملف | \`$(basename "$APK")\` |"
+            echo "| الحجم | $(du -h "$APK" | cut -f1) |"
+            echo "| التوقيع | ${SIGNING_MODE:-debug} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Camera-${{ env.BUILD_TYPE }}-apk
+          path: dist/*.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      # R8 mapping: turns obfuscated crash stack traces back into readable ones
+      - name: Upload R8 mapping
+        if: ${{ env.BUILD_TYPE == 'release' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: Camera-r8-mapping
+          path: app/build/outputs/mapping/release/mapping.txt
+          if-no-files-found: ignore
+          retention-days: 30
+
+      # Never publish a Release that users cannot install over the previous one.
+      - name: Refuse to publish with a temporary key
+        if: ${{ steps.meta.outputs.publish == 'true' && steps.sign.outputs.permanent != 'true' }}
+        run: |
+          echo "::error title=لن يُنشر الإصدار::أسرار مفتاح التوقيع الدائم ناقصة أو فارغة: ${{ steps.sign.outputs.missing }} (الأسماء المطلوبة: KEYSTORE_BASE64 و KEYSTORE_PASSWORD و KEY_ALIAS). أي Release بمفتاح تجريبي لن يتحدّث فوق النسخة المثبّتة (خطأ: التوقيع لا يطابق). الحل في SIGNING.md. الـ APK متاح في Artifacts للتجربة فقط."
+          exit 1
+
+  # Publishes the APK as a GitHub Release
+  release:
+    name: Publish GitHub Release
+    needs: build
+    if: ${{ !cancelled() && needs.build.result == 'success' && needs.build.outputs.publish == 'true' && needs.build.outputs.permanent == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ needs.build.outputs.tag }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: Camera-release-apk
+          path: dist
+
+      - name: Create or update release
+        env:
+          VERSION_CODE: ${{ needs.build.outputs.code }}
+        run: |
+          APK="$(ls dist/*.apk | head -n1)"
+          SHA="$(sha256sum "$APK" | cut -d' ' -f1)"
+          # The in-app updater reads these two lines to verify the download
+          FOOTER="$(printf '\n\n---\nversionCode: %s\nSHA-256: %s\n' "$VERSION_CODE" "$SHA")"
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            BODY="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body -q .body | grep -v -E '^(versionCode|SHA-256):' | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}')"
+            gh release upload "$TAG" dist/*.apk --clobber --repo "$GITHUB_REPOSITORY"
+            printf '%s%s' "$BODY" "$FOOTER" > notes.md
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file notes.md
+          else
+            printf '%s' "$FOOTER" > notes.md
+            gh release create "$TAG" "$APK" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "$TAG" --generate-notes --notes-file notes.md
+          fi
