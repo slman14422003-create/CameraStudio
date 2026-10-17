@@ -9,6 +9,7 @@ import android.provider.MediaStore;
 import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraMetadata;
 import android.graphics.ImageFormat;
+import android.util.Rational;
 import android.hardware.camera2.CaptureRequest;
 import android.hardware.camera2.params.StreamConfigurationMap;
 import android.util.Range;
@@ -28,6 +29,8 @@ import androidx.camera.core.FocusMeteringAction;
 import androidx.camera.core.ImageCapture;
 import androidx.camera.core.MeteringPoint;
 import androidx.camera.core.Preview;
+import androidx.camera.core.UseCaseGroup;
+import androidx.camera.core.ViewPort;
 import androidx.camera.core.ZoomState;
 import androidx.camera.core.resolutionselector.AspectRatioStrategy;
 import androidx.camera.core.resolutionselector.ResolutionSelector;
@@ -120,6 +123,12 @@ final class CameraEngine {
     boolean evSupported;
     int evMin, evMax;
     float evStep = 1f;
+    // video: aspect (0 = 9:16, 1 = 1:1, 2 = full screen) and the live GPU enhancement
+    private VideoFx fx;
+    private int fxGen;
+    private int vRatio;
+    private int vRatioW = 9, vRatioH = 16;
+
     // back lenses (ultra wide / main / tele) that CameraX exposes as separate cameras
     static final class Lens {
         final String id;
@@ -280,6 +289,39 @@ final class CameraEngine {
             }
         }
         return videoQualities.get(0);
+    }
+
+    /** Sets the video aspect: 0 = 9:16, 1 = 1:1, 2 = full screen (w and h give the screen shape). */
+    void setVideoRatio(int kind, int w, int h) {
+        if (recording != null) return;
+        boolean changed = vRatio != kind || (kind == 2 && (vRatioW != w || vRatioH != h));
+        vRatio = kind;
+        vRatioW = Math.max(1, w);
+        vRatioH = Math.max(1, h);
+        if (changed && mode == VIDEO) bind();
+    }
+
+    /** Remembers the video aspect without re-binding (used right before entering the video mode). */
+    void presetVideoRatio(int kind, int w, int h) {
+        vRatio = kind;
+        vRatioW = Math.max(1, w);
+        vRatioH = Math.max(1, h);
+    }
+
+    int fxGen() {
+        return fxGen;
+    }
+
+    boolean fxActive() {
+        return fx != null;
+    }
+
+    int fxFrames() {
+        return fx == null ? 0 : fx.frames();
+    }
+
+    boolean fxFailed() {
+        return fx != null && fx.failed();
     }
 
     boolean isRecording() {
@@ -529,6 +571,10 @@ final class CameraEngine {
         if (recording != null) stopRecording();
         try {
             provider.unbindAll();
+            if (fx != null) {
+                fx.release();
+                fx = null;
+            }
             if (zoomData != null && zoomObs != null) zoomData.removeObserver(zoomObs);
             CameraSelector base = new CameraSelector.Builder()
                     .requireLensFacing(front ? CameraSelector.LENS_FACING_FRONT : CameraSelector.LENS_FACING_BACK).build();
@@ -564,8 +610,12 @@ final class CameraEngine {
 
             if (mode == VIDEO) {
                 videoQuality = pickQuality();
+                // the preview gets the same 1080p source as the recording (not a small default size)
                 ResolutionSelector previewRes = new ResolutionSelector.Builder()
-                        .setAspectRatioStrategy(AspectRatioStrategy.RATIO_16_9_FALLBACK_AUTO_STRATEGY).build();
+                        .setAspectRatioStrategy(AspectRatioStrategy.RATIO_16_9_FALLBACK_AUTO_STRATEGY)
+                        .setResolutionStrategy(new ResolutionStrategy(new Size(1920, 1080),
+                                ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER))
+                        .build();
                 Preview preview = new Preview.Builder().setResolutionSelector(previewRes).build();
                 preview.setSurfaceProvider(view.getSurfaceProvider());
                 if (videoQuality == null) {
@@ -587,7 +637,22 @@ final class CameraEngine {
                     videoSize = QualitySelector.getResolution(infos.get(0), videoQuality);
                 } catch (Throwable ignored) {
                 }
-                camera = provider.bindToLifecycle(act, sel, preview, videoCapture);
+                float fxStrength = Store.num(act, "vfx", 2) == 1 ? 0.35f : Store.num(act, "vfx", 2) == 3 ? 0.9f : 0.6f;
+                if (Store.num(act, "vfx", 2) > 0 && Build.VERSION.SDK_INT >= 23) {
+                    try {
+                        fx = new VideoFx(fxStrength);
+                        fxGen++;
+                    } catch (Throwable t) {
+                        fx = null;
+                    }
+                }
+                UseCaseGroup.Builder gb = new UseCaseGroup.Builder().addUseCase(preview).addUseCase(videoCapture);
+                if (fx != null) gb.addEffect(fx.effect());
+                Rational ratio = vRatio == 1 ? new Rational(1, 1) : vRatio == 2 ? new Rational(vRatioW, vRatioH) : null;
+                if (ratio != null) {
+                    gb.setViewPort(new ViewPort.Builder(ratio, act.getWindowManager().getDefaultDisplay().getRotation()).build());
+                }
+                camera = provider.bindToLifecycle(act, sel, gb.build());
             } else {
                 // photos: 4:3, about 12 MP (the A16 bins its 50 MP sensor to 12.5 MP: sharper and much faster);
                 // "high resolution" asks CameraX for the full sensor size instead

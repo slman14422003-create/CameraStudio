@@ -121,4 +121,11 @@
     <string name="info_photo">أعلى دقة صورة</string>
     <string name="set_level_line">خط الأفق</string>
     <string name="set_level_line_sub">يظهر خط يساعدك على إمساك الهاتف مستقيماً</string>
+    <string name="set_vfx">معالجة الفيديو المباشرة</string>
+    <string name="vfx_off">متوقفة</string>
+    <string name="vfx_light">خفيفة</string>
+    <string name="vfx_normal">متوسطة</string>
+    <string name="vfx_strong">قوية</string>
+    <string name="cam_ratio_full">كامل</string>
+    <string name="cam_vfx_failed">تعذّرت معالجة الفيديو المباشرة على هذا الهاتف، تم إيقافها</string>
 </resources>

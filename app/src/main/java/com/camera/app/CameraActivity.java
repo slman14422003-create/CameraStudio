@@ -77,7 +77,8 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
     private FrameLayout holder;
     private GridView grid;
     private View focusRing;
-    private TextView status, hdrBtn, timerBtn, infoPill, countView;
+    private TextView status, hdrBtn, timerBtn, infoPill, countView, ratioPill;
+    private int vKind;
     private LinearLayout lensRow;
     private final List<TextView> lensBtns = new ArrayList<>();
     private final List<Float> lensStops = new ArrayList<>();
@@ -236,7 +237,7 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         holder.setBackgroundColor(Color.BLACK);
         previewView = new PreviewView(this);
         previewView.setScaleType(PreviewView.ScaleType.FIT_CENTER);
-        previewView.setImplementationMode(PreviewView.ImplementationMode.COMPATIBLE);
+        previewView.setImplementationMode(PreviewView.ImplementationMode.PERFORMANCE);
         holder.addView(previewView, new FrameLayout.LayoutParams(-1, -1));
         grid = new GridView(this);
         holder.addView(grid, new FrameLayout.LayoutParams(-1, -1));
@@ -267,6 +268,17 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         ip.setMarginStart(dp(10));
         infoPill.setVisibility(View.GONE);
         holder.addView(infoPill, ip);
+
+        vKind = Store.num(this, "vratio", 0);
+        ratioPill = pill();
+        ratioPill.setTextSize(12);
+        ratioPill.setOnClickListener(v -> cycleVideoRatio());
+        Ui.press(this, ratioPill);
+        FrameLayout.LayoutParams rp = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.END);
+        rp.topMargin = dp(10);
+        rp.setMarginEnd(dp(10));
+        ratioPill.setVisibility(View.GONE);
+        holder.addView(ratioPill, rp);
 
         countView = new TextView(this);
         countView.setTextColor(Color.WHITE);
@@ -712,6 +724,7 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
 
     private void setMode(int m) {
         if (busy || recActive || counting) return;
+        if (m == CameraEngine.VIDEO) presetRatio();
         engine.setMode(m);
         if (m == CameraEngine.VIDEO && Store.bool(this, "vaudio", true)
                 && ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
@@ -720,6 +733,36 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
             audioLauncher.launch(Manifest.permission.RECORD_AUDIO);
         }
         refreshModeUi();
+    }
+
+    private int[] ratioDims() {
+        int w = holder.getWidth() > 0 ? holder.getWidth() : getResources().getDisplayMetrics().widthPixels;
+        int h;
+        if (vKind == 0) h = w * 16 / 9;
+        else if (vKind == 1) h = w;
+        else {
+            View par = (View) holder.getParent();
+            h = par.getHeight() > 0 ? par.getHeight() - holder.getTop() : getResources().getDisplayMetrics().heightPixels;
+        }
+        return new int[]{w, Math.max(1, h)};
+    }
+
+    private void presetRatio() {
+        int[] d = ratioDims();
+        engine.presetVideoRatio(vKind, d[0], d[1]);
+    }
+
+    private void cycleVideoRatio() {
+        if (recActive || counting || busy) return;
+        vKind = (vKind + 1) % 3;
+        Store.setNum(this, "vratio", vKind);
+        refreshModeUi();
+        int[] d = ratioDims();
+        engine.setVideoRatio(vKind, d[0], d[1]);
+    }
+
+    private void refreshRatioPill() {
+        ratioPill.setText(vKind == 0 ? "9:16" : vKind == 1 ? "1:1" : getString(R.string.cam_ratio_full));
     }
 
     private void styleMode(TextView t, boolean sel) {
@@ -838,20 +881,23 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
             }
         }
         boolean vid = m == CameraEngine.VIDEO;
-        if (holder instanceof Ratio34) ((Ratio34) holder).setVideo(vid);
+        if (holder instanceof Ratio34) ((Ratio34) holder).setVideo(vid, vKind);
+        ratioPill.setVisibility(vid ? View.VISIBLE : View.GONE);
+        refreshRatioPill();
         LinearLayout.LayoutParams hl = (LinearLayout.LayoutParams) holder.getLayoutParams();
-        int wantMargin = vid ? -dp(130) : 0;
+        boolean overlap = vid && vKind != 1;
+        int wantMargin = overlap ? -dp(130) : 0;
         if (hl.bottomMargin != wantMargin) {
             hl.bottomMargin = wantMargin;
             holder.setLayoutParams(hl);
         }
         FrameLayout.LayoutParams zl = (FrameLayout.LayoutParams) lensRow.getLayoutParams();
-        int lensMargin = dp(10) + (vid ? dp(130) : 0);
+        int lensMargin = dp(10) + (overlap ? dp(130) : 0);
         if (zl.bottomMargin != lensMargin) {
             zl.bottomMargin = lensMargin;
             lensRow.setLayoutParams(zl);
         }
-        if (vid) {
+        if (overlap) {
             GradientDrawable scrim = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
                     new int[]{0x00000000, 0xB3000000, 0xF2000000});
             bottomBar.setBackground(scrim);
@@ -1469,6 +1515,17 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         refreshTop();
         rebuildLensRow();
         refreshInfoPill();
+        if (engine.mode() == CameraEngine.VIDEO && engine.fxActive()) {
+            final int gen = engine.fxGen();
+            previewView.postDelayed(() -> {
+                if (engine.fxActive() && engine.fxGen() == gen && engine.mode() == CameraEngine.VIDEO && !recActive
+                        && (engine.fxFailed() || engine.fxFrames() == 0)) {
+                    Store.setNum(this, "vfx", 0);
+                    Toast.makeText(this, R.string.cam_vfx_failed, Toast.LENGTH_LONG).show();
+                    engine.bind();
+                }
+            }, 3500);
+        }
         if (pendingStop > 0f) {
             float z = pendingStop;
             pendingStop = -1f;
@@ -1500,15 +1557,17 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
     /** Keeps the preview 3:4 (the photo's shape) whatever the screen is. */
     private static final class Ratio34 extends FrameLayout {
         private boolean video;
+        private int kind;
 
         Ratio34(android.content.Context c) {
             super(c);
         }
 
         /** Video is recorded 9:16, so its preview is 9:16 too (the controls float over its lower part). */
-        void setVideo(boolean v) {
-            if (video == v) return;
+        void setVideo(boolean v, int k) {
+            if (video == v && kind == k) return;
             video = v;
+            kind = k;
             requestLayout();
         }
 
@@ -1518,8 +1577,9 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
             int height = width * 4 / 3;
             if (video) {
                 int avail = MeasureSpec.getSize(h);
-                height = width * 16 / 9;
-                if (avail > 0) height = Math.min(height, avail);
+                height = kind == 1 ? width : width * 16 / 9;
+                if (kind == 2 && avail > 0) height = avail;
+                else if (avail > 0) height = Math.min(height, avail);
             }
             super.onMeasure(MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY),
                     MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY));

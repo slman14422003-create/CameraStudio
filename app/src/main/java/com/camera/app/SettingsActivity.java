@@ -60,6 +60,9 @@ public class SettingsActivity extends BaseActivity {
         content.addView(Ui.footer(this, getString(R.string.set_quality_note)));
 
         content.addView(Ui.sectionTitle(this, getString(R.string.set_video)));
+        content.addView(Ui.rowView(this, content, new Row(R.drawable.ic_adjust, false,
+                getString(R.string.set_vfx), getString(vfxName(Store.num(this, "vfx", 2))), false, true).tint(PINK),
+                v -> pickVfx()));
         Ui.Toggle vs = Ui.toggle(this, content, R.string.set_vstab, R.string.set_vstab_sub,
                 Store.bool(this, "vstab", true), R.drawable.ic_focus, GREEN);
         vs.onChange((bt, on) -> Store.setBool(this, "vstab", on));
@@ -151,6 +154,21 @@ public class SettingsActivity extends BaseActivity {
         }
         new Dlg(this).setTitle(R.string.set_night_frames).setItems(names, (d, which) -> {
             Store.setNum(this, "night_frames", v[which]);
+            render();
+        }).show();
+    }
+
+    private int vfxName(int v) {
+        return v == 0 ? R.string.vfx_off : v == 1 ? R.string.vfx_light : v == 3 ? R.string.vfx_strong : R.string.vfx_normal;
+    }
+
+    private void pickVfx() {
+        final int[] v = {0, 1, 2, 3};
+        int cur = Store.num(this, "vfx", 2);
+        String[] names = new String[v.length];
+        for (int i = 0; i < v.length; i++) names[i] = (v[i] == cur ? "● " : "○ ") + getString(vfxName(v[i]));
+        new Dlg(this).setTitle(R.string.set_vfx).setItems(names, (d, which) -> {
+            Store.setNum(this, "vfx", v[which]);
             render();
         }).show();
     }
