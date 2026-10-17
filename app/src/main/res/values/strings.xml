@@ -128,4 +128,14 @@
     <string name="vfx_strong">قوية</string>
     <string name="cam_ratio_full">كامل</string>
     <string name="cam_vfx_failed">تعذّرت معالجة الفيديو المباشرة على هذا الهاتف، تم إيقافها</string>
+    <string name="cam_mode_deep">عميق</string>
+    <string name="set_deep">التقاط عميق</string>
+    <string name="set_deep_sub">يظهر وضع «عميق» في الكاميرا: ثبّت يدك ويدمج عشرات اللقطات في صورة واحدة بتفاصيل أكثر وضجيج أقل</string>
+    <string name="set_deep_time">مدة التثبيت</string>
+    <string name="set_deep_res">دقة الالتقاط العميق</string>
+    <string name="deep_secs">%d ثانية</string>
+    <string name="deep_res_12">12 ميجابكسل (الأنظف في الإضاءة الضعيفة)</string>
+    <string name="deep_res_50">50 ميجابكسل (يحتاج ذاكرة فارغة، وإلا يُستخدم 12)</string>
+    <string name="deep_hold">ثبّت هاتفك ولا تحرّكه حتى ينتهي العدّ. اضغط الزر للإنهاء مبكراً</string>
+    <string name="deep_status">ثبّت هاتفك · %d لقطة</string>
 </resources>

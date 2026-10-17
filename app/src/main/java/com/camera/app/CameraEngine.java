@@ -71,7 +71,7 @@ import java.util.concurrent.TimeUnit;
  */
 @SuppressLint("UnsafeOptInUsageError")
 final class CameraEngine {
-    static final int PHOTO = 0, NIGHT = 1, PRO = 2, VIDEO = 3, HIRES = 4;
+    static final int PHOTO = 0, NIGHT = 1, PRO = 2, VIDEO = 3, HIRES = 4, DEEP = 5;
 
     interface Listener {
         /** The camera was (re)bound: capabilities below are up to date. */
@@ -124,6 +124,7 @@ final class CameraEngine {
     int evMin, evMax;
     float evStep = 1f;
     // video: aspect (0 = 9:16, 1 = 1:1, 2 = full screen) and the live GPU enhancement
+    private boolean deepHires;
     private VideoFx fx;
     private int fxGen;
     private int vRatio;
@@ -212,6 +213,14 @@ final class CameraEngine {
         if (hires == h) return;
         hires = h;
         bind();
+    }
+
+    /** Deep capture on the full-resolution sensor mode (50 MP) instead of the binned one (12 MP). */
+    void setDeepHires(boolean h) {
+        if (deepHires == h) return;
+        boolean before = hiresActive();
+        deepHires = h;
+        if (mode == DEEP && before != hiresActive()) bind();
     }
 
     boolean isHires() {
@@ -483,7 +492,7 @@ final class CameraEngine {
 
     /** True when the full-resolution (e.g. 50 MP) mode is on and usable in the current mode. */
     boolean hiresActive() {
-        return hiresAvailable && mode == HIRES;
+        return hiresAvailable && (mode == HIRES || (mode == DEEP && deepHires));
     }
 
     private static boolean has(int[] a, int v) {
@@ -676,7 +685,7 @@ final class CameraEngine {
                 preview.setSurfaceProvider(view.getSurfaceProvider());
 
                 ImageCapture.Builder ib = new ImageCapture.Builder()
-                        .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
+                        .setCaptureMode(mode == DEEP ? ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY : ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
                         .setJpegQuality(100)
                         .setResolutionSelector(shotRes)
                         .setFlashMode(flashForMode());

@@ -128,4 +128,14 @@
     <string name="vfx_strong">Strong</string>
     <string name="cam_ratio_full">Full</string>
     <string name="cam_vfx_failed">Live video processing does not work on this phone and was turned off</string>
+    <string name="cam_mode_deep">Deep</string>
+    <string name="set_deep">Deep capture</string>
+    <string name="set_deep_sub">Adds a "Deep" mode to the camera: hold the phone still and dozens of frames are merged into one picture with more detail and less noise</string>
+    <string name="set_deep_time">Hold time</string>
+    <string name="set_deep_res">Deep capture resolution</string>
+    <string name="deep_secs">%d seconds</string>
+    <string name="deep_res_12">12 MP (cleanest in low light)</string>
+    <string name="deep_res_50">50 MP (needs free memory, otherwise 12 MP is used)</string>
+    <string name="deep_hold">Hold the phone still until the count ends. Tap the button to finish early</string>
+    <string name="deep_status">Hold still · %d frames</string>
 </resources>

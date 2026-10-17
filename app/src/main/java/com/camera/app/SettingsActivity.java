@@ -59,6 +59,18 @@ public class SettingsActivity extends BaseActivity {
         content.addView(hi.view);
         content.addView(Ui.footer(this, getString(R.string.set_quality_note)));
 
+        content.addView(Ui.sectionTitle(this, getString(R.string.set_deep)));
+        Ui.Toggle deepT = Ui.toggle(this, content, R.string.set_deep, R.string.set_deep_sub,
+                Store.bool(this, "deep_on", false), R.drawable.ic_camera, TEAL);
+        deepT.onChange((b3, on) -> Store.setBool(this, "deep_on", on));
+        content.addView(deepT.view);
+        content.addView(Ui.rowView(this, content, new Row(R.drawable.ic_speed, false,
+                getString(R.string.set_deep_time), getString(R.string.deep_secs, Store.num(this, "deep_secs", 15)), false, true).tint(ORANGE),
+                v -> pickDeepTime()));
+        content.addView(Ui.rowView(this, content, new Row(R.drawable.ic_aspect, false,
+                getString(R.string.set_deep_res), getString(Store.num(this, "deep_res", 0) == 1 ? R.string.deep_res_50 : R.string.deep_res_12), false, true).tint(PINK),
+                v -> pickDeepRes()));
+
         content.addView(Ui.sectionTitle(this, getString(R.string.set_video)));
         content.addView(Ui.rowView(this, content, new Row(R.drawable.ic_adjust, false,
                 getString(R.string.set_vfx), getString(vfxName(Store.num(this, "vfx", 2))), false, true).tint(PINK),
@@ -154,6 +166,27 @@ public class SettingsActivity extends BaseActivity {
         }
         new Dlg(this).setTitle(R.string.set_night_frames).setItems(names, (d, which) -> {
             Store.setNum(this, "night_frames", v[which]);
+            render();
+        }).show();
+    }
+
+    private void pickDeepTime() {
+        final int[] v = {10, 15, 30};
+        int cur = Store.num(this, "deep_secs", 15);
+        String[] names = new String[v.length];
+        for (int i = 0; i < v.length; i++) names[i] = (v[i] == cur ? "● " : "○ ") + getString(R.string.deep_secs, v[i]);
+        new Dlg(this).setTitle(R.string.set_deep_time).setItems(names, (d, which) -> {
+            Store.setNum(this, "deep_secs", v[which]);
+            render();
+        }).show();
+    }
+
+    private void pickDeepRes() {
+        int cur = Store.num(this, "deep_res", 0);
+        String[] names = {(cur == 0 ? "● " : "○ ") + getString(R.string.deep_res_12),
+                (cur == 1 ? "● " : "○ ") + getString(R.string.deep_res_50)};
+        new Dlg(this).setTitle(R.string.set_deep_res).setItems(names, (d, which) -> {
+            Store.setNum(this, "deep_res", which);
             render();
         }).show();
     }

@@ -138,6 +138,119 @@ final class Processor {
         });
     }
 
+    // ============================================================ deep capture
+
+    /** A deep capture: frames are merged one by one while the user holds the phone still (memory stays constant). */
+    static final class Deep {
+        final AtomicInteger pending = new AtomicInteger();
+        volatile boolean failed;
+        int rotation;
+        byte[] first;
+        long handle;
+        int w, h;
+        int merged;
+        double best;
+    }
+
+    static Deep deepBegin() {
+        return new Deep();
+    }
+
+    static int deepPending(Deep d) {
+        return d.pending.get();
+    }
+
+    static int deepMerged(Deep d) {
+        return d.merged;
+    }
+
+    /** Sharpness of the centre of a frame (gradient energy): blurred frames (hand shake) score low. */
+    private static double sharpness(Bitmap b) {
+        int cw = Math.min(512, b.getWidth()), ch = Math.min(512, b.getHeight());
+        int x0 = (b.getWidth() - cw) / 2, y0 = (b.getHeight() - ch) / 2;
+        int[] px = new int[cw * ch];
+        b.getPixels(px, 0, cw, x0, y0, cw, ch);
+        double acc = 0;
+        for (int y = 0; y < ch - 1; y++) {
+            for (int x = 0; x < cw - 1; x++) {
+                int a = px[y * cw + x], r = px[y * cw + x + 1], d = px[(y + 1) * cw + x];
+                int ga = ((a >> 16 & 255) * 3 + (a >> 8 & 255) * 6 + (a & 255)) / 10;
+                int gr = ((r >> 16 & 255) * 3 + (r >> 8 & 255) * 6 + (r & 255)) / 10;
+                int gd = ((d >> 16 & 255) * 3 + (d >> 8 & 255) * 6 + (d & 255)) / 10;
+                acc += Math.abs(ga - gr) + Math.abs(ga - gd);
+            }
+        }
+        return acc / (cw * ch);
+    }
+
+    /** Queues one frame; it is decoded, checked for sharpness and merged on the processing thread. */
+    static void deepAdd(final Deep d, final byte[] jpeg) {
+        d.pending.incrementAndGet();
+        EXEC.execute(() -> {
+            try {
+                if (d.failed || !Native.LOADED) return;
+                Bitmap b = decode(jpeg, 1);
+                if (b == null) return;
+                try {
+                    if (d.handle == 0) {
+                        d.w = b.getWidth();
+                        d.h = b.getHeight();
+                        d.handle = Native.mergeBegin(d.w, d.h);
+                        if (d.handle == 0 || !Native.mergeAdd(d.handle, b)) {
+                            d.failed = true;
+                            return;
+                        }
+                        d.first = jpeg;
+                        d.best = sharpness(b);
+                        d.merged = 1;
+                    } else if (b.getWidth() == d.w && b.getHeight() == d.h) {
+                        double s = sharpness(b);
+                        if (s >= d.best * 0.6 && Native.mergeAdd(d.handle, b)) {
+                            d.merged++;
+                            if (s > d.best) d.best = s;
+                        }
+                    }
+                } finally {
+                    b.recycle();
+                }
+            } catch (Throwable t) {
+                d.failed = true;
+            } finally {
+                d.pending.decrementAndGet();
+            }
+        });
+    }
+
+    /** Runs after every queued frame: merges, enhances, saves. If anything fails the first frame is saved as it is. */
+    static void deepFinish(Context ctx, final Deep d, final int quality, Done done) {
+        final Context app = ctx.getApplicationContext();
+        PENDING.incrementAndGet();
+        EXEC.execute(() -> {
+            Uri uri = null;
+            boolean enhanced = false;
+            Bitmap base = null;
+            try {
+                if (d.handle == 0 || d.first == null) throw new IOException("no frames");
+                base = decode(d.first, 1);
+                if (base == null) throw new IOException("decode failed");
+                Native.mergeEnd(d.handle, base);
+                float[] p = Levels.deep();
+                Native.enhance(base, p[0], p[1], p[2], p[3], p[4]);
+                byte[] out = encode(base, quality);
+                uri = Saver.saveJpeg(app, out, d.first, d.rotation, base.getWidth(), base.getHeight());
+                enhanced = true;
+            } catch (Throwable t) {
+                enhanced = false;
+                if (d.first != null) uri = fallback(app, d.first, d.rotation);
+            } finally {
+                if (d.handle != 0) Native.mergeFree(d.handle);
+                d.handle = 0;
+                if (base != null) base.recycle();
+            }
+            finish(done, uri, enhanced);
+        });
+    }
+
     private static Uri fallback(Context app, byte[] jpeg, int rotation) {
         try {
             return Saver.saveJpeg(app, jpeg, jpeg, rotation, 0, 0);

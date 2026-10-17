@@ -21,6 +21,7 @@ import android.media.MediaScannerConnection;
 import android.net.Uri;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.os.Build;
 import android.os.Bundle;
 import android.provider.MediaStore;
@@ -87,6 +88,10 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
     private final List<TextView> videoChips = new ArrayList<>();
     private boolean recActive, counting, lastIsVideo, multiShot;
     private float pendingStop = -1f;
+    private Processor.Deep deep;
+    private boolean deepRunning, deepStop;
+    private long deepEnd;
+    private int deepFrames, deepErrors;
     private String recText = "";
     private final Handler hand = new Handler(Looper.getMainLooper());
     private ImageButton flashBtn, gridBtn, switchBtn;
@@ -363,9 +368,9 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         LinearLayout modes = new LinearLayout(this);
         modes.setOrientation(LinearLayout.HORIZONTAL);
         modes.setGravity(Gravity.CENTER);
-        final int[] order = {CameraEngine.PHOTO, CameraEngine.HIRES, CameraEngine.NIGHT, CameraEngine.PRO, CameraEngine.VIDEO};
+        final int[] order = {CameraEngine.PHOTO, CameraEngine.HIRES, CameraEngine.NIGHT, CameraEngine.DEEP, CameraEngine.PRO, CameraEngine.VIDEO};
         final int[] names = {R.string.cam_mode_photo, R.string.cam_mode_photo, R.string.cam_mode_night,
-                R.string.cam_mode_pro, R.string.cam_mode_video};
+                R.string.cam_mode_deep, R.string.cam_mode_pro, R.string.cam_mode_video};
         for (int i = 0; i < order.length; i++) {
             final int m = order[i];
             TextView t = new TextView(this);
@@ -380,7 +385,7 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
             });
             Ui.press(this, t);
             styleMode(t, m == CameraEngine.PHOTO);
-            if (m == CameraEngine.HIRES) t.setVisibility(View.GONE);
+            if (m == CameraEngine.HIRES || m == CameraEngine.DEEP) t.setVisibility(View.GONE);
             modeChips.add(t);
             modeIds.add(m);
             modes.addView(t);
@@ -725,6 +730,7 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
     private void setMode(int m) {
         if (busy || recActive || counting) return;
         if (m == CameraEngine.VIDEO) presetRatio();
+        if (m == CameraEngine.DEEP) engine.setDeepHires(deepWantsHires());
         engine.setMode(m);
         if (m == CameraEngine.VIDEO && Store.bool(this, "vaudio", true)
                 && ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
@@ -763,6 +769,18 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
 
     private void refreshRatioPill() {
         ratioPill.setText(vKind == 0 ? "9:16" : vKind == 1 ? "1:1" : getString(R.string.cam_ratio_full));
+    }
+
+    private boolean deepWantsHires() {
+        if (Store.num(this, "deep_res", 0) != 1) return false;
+        try {
+            android.app.ActivityManager am = (android.app.ActivityManager) getSystemService(ACTIVITY_SERVICE);
+            android.app.ActivityManager.MemoryInfo mi = new android.app.ActivityManager.MemoryInfo();
+            am.getMemoryInfo(mi);
+            return !mi.lowMemory && mi.availMem > 2000L * 1024 * 1024;   // 50 MP frames need about 350 MB to merge
+        } catch (Throwable t) {
+            return false;
+        }
     }
 
     private void styleMode(TextView t, boolean sel) {
@@ -873,6 +891,9 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         for (int i = 0; i < modeChips.size(); i++) {
             int id = modeIds.get(i);
             styleMode(modeChips.get(i), id == m);
+            if (id == CameraEngine.DEEP) {
+                modeChips.get(i).setVisibility(Store.bool(this, "deep_on", false) ? View.VISIBLE : View.GONE);
+            }
             if (id == CameraEngine.HIRES) {
                 modeChips.get(i).setVisibility(hiOk ? View.VISIBLE : View.GONE);
                 if (hiOk && engine.maxSize != null) {
@@ -904,11 +925,11 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         } else {
             bottomBar.setBackground(null);
         }
-        levelRow.setVisibility(vid ? View.GONE : m == CameraEngine.NIGHT ? View.INVISIBLE : View.VISIBLE);
+        levelRow.setVisibility(vid ? View.GONE : (m == CameraEngine.NIGHT || m == CameraEngine.DEEP) ? View.INVISIBLE : View.VISIBLE);
         videoRow.setVisibility(vid ? View.VISIBLE : View.GONE);
         if (vid && engine != null) rebuildVideoRow();
         proPanel.setVisibility(m == CameraEngine.PRO ? View.VISIBLE : View.GONE);
-        shutter.setNight(m == CameraEngine.NIGHT);
+        shutter.setNight(m == CameraEngine.NIGHT || m == CameraEngine.DEEP);
         shutter.setVideo(vid);
         refreshInfoPill();
         if (m == CameraEngine.PRO && engine != null) rebuildPro();
@@ -922,7 +943,7 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
     }
 
     private void refreshTop() {
-        boolean photo = engine == null || engine.mode() == CameraEngine.PHOTO || engine.mode() == CameraEngine.HIRES;
+        boolean photo = engine == null || engine.mode() == CameraEngine.PHOTO || engine.mode() == CameraEngine.HIRES;   // deep: no flash
         boolean video = engine != null && engine.mode() == CameraEngine.VIDEO;
         boolean canFlash = engine != null && engine.hasFlash && !engine.isFront() && (photo || video);
         flashBtn.setVisibility(canFlash ? View.VISIBLE : View.INVISIBLE);
@@ -1068,6 +1089,10 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
             engine.stopRecording();
             return;
         }
+        if (deepRunning) {
+            deepStop = true;   // finish early with the frames taken so far
+            return;
+        }
         if (busy) return;
         if (counting) {
             cancelCountdown();
@@ -1162,8 +1187,98 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         Toast.makeText(this, R.string.cam_video_saved, Toast.LENGTH_SHORT).show();
     }
 
+    // ---- deep capture: hold still, many frames are merged into one
+
+    private final Runnable deepTick = new Runnable() {
+        @Override
+        public void run() {
+            if (!deepRunning) return;
+            long left = Math.max(0, deepEnd - SystemClock.uptimeMillis());
+            countView.setText(String.valueOf((left + 999) / 1000));
+            countView.setVisibility(View.VISIBLE);
+            nightText = getString(R.string.deep_status, deepFrames);
+            updateStatus();
+            hand.postDelayed(this, 250);
+        }
+    };
+
+    private void startDeep() {
+        int secs = Store.num(this, "deep_secs", 15);
+        deep = Processor.deepBegin();
+        deepRunning = true;
+        deepStop = false;
+        deepFrames = 0;
+        deepErrors = 0;
+        deepEnd = SystemClock.uptimeMillis() + secs * 1000L;
+        busy = true;
+        shutter.setRecording(true);
+        shutter.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+        Toast.makeText(this, R.string.deep_hold, Toast.LENGTH_SHORT).show();
+        hand.post(deepTick);
+        deepNext();
+    }
+
+    private void deepNext() {
+        if (!deepRunning) return;
+        int cap = engine.hiresActive() ? 10 : 60;   // 50 MP frames are big: fewer, the merge buffer grows with the size
+        if (deepStop || SystemClock.uptimeMillis() >= deepEnd || deepFrames >= cap || deepErrors >= 5) {
+            finishDeep();
+            return;
+        }
+        if (Processor.deepPending(deep) > 2) {
+            hand.postDelayed(this::deepNext, 80);   // the merge is slower than the camera: wait for it
+            return;
+        }
+        engine.capture(new ImageCapture.OnImageCapturedCallback() {
+            @Override
+            public void onCaptureSuccess(ImageProxy image) {
+                byte[] b = jpegBytes(image);
+                int rot = image.getImageInfo().getRotationDegrees();
+                image.close();
+                if (b == null || deep == null) {
+                    deepErrors++;
+                } else {
+                    if (deepFrames == 0) deep.rotation = rot;
+                    Processor.deepAdd(deep, b);
+                    deepFrames++;
+                }
+                hand.post(CameraActivity.this::deepNext);
+            }
+
+            @Override
+            public void onError(ImageCaptureException e) {
+                deepErrors++;
+                hand.postDelayed(CameraActivity.this::deepNext, 150);
+            }
+        });
+    }
+
+    private void finishDeep() {
+        if (!deepRunning) return;
+        deepRunning = false;
+        hand.removeCallbacks(deepTick);
+        countView.setVisibility(View.GONE);
+        nightText = "";
+        busy = false;
+        shutter.setRecording(false);
+        shutter.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+        Processor.Deep d = deep;
+        deep = null;
+        if (d == null || deepFrames == 0) {
+            Toast.makeText(this, R.string.cam_error, Toast.LENGTH_SHORT).show();
+            updateStatus();
+            return;
+        }
+        Processor.deepFinish(this, d, quality(), done);
+        updateStatus();
+    }
+
     private void shootNow() {
         if (busy) return;
+        if (engine.mode() == CameraEngine.DEEP) {
+            startDeep();
+            return;
+        }
         if (engine.mode() == CameraEngine.PHOTO && Store.bool(this, "multi_photo", true) && flashState == 0
                 && !Store.bool(this, "hdr", false) && !engine.hiresActive() && Native.LOADED && !Levels.OFF.equals(level)) {
             multiShot = true;
@@ -1473,6 +1588,11 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
 
         engine.checkPrefs();
         if (levelView != null) levelView.start();
+        if (engine.mode() == CameraEngine.DEEP) {
+            if (!Store.bool(this, "deep_on", false)) engine.setMode(CameraEngine.PHOTO);
+            else engine.setDeepHires(deepWantsHires());
+        }
+        refreshModeUi();
         level = Store.str(this, "level", level);
         for (TextView c : levelChips) Ui.setChip(this, c, level.equals(c.getTag()));
         refreshTop();
@@ -1483,6 +1603,10 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
     @Override
     protected void onPause() {
         if (levelView != null) levelView.stop();
+        if (deepRunning) {
+            deepStop = true;
+            finishDeep();
+        }
         if (counting) cancelCountdown();
         if (recActive) engine.stopRecording();
         if (orient != null) orient.disable();
@@ -1719,6 +1843,12 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
             int accent = Ui.color(getContext(), R.color.accent);
             ring.setColor(night ? accent : Color.WHITE);
             c.drawCircle(cx, cy, r - ring.getStrokeWidth() / 2f, ring);
+            if (rec && !video) {   // deep capture running: a square means "tap to finish"
+                disc.setColor(night ? accent : Color.WHITE);
+                float hs = (r - Ui.dpf(getContext(), 9f)) * 0.5f;
+                c.drawRoundRect(cx - hs, cy - hs, cx + hs, cy + hs, hs * 0.3f, hs * 0.3f, disc);
+                return;
+            }
             if (video) {
                 disc.setColor(0xFFFF3B30);
                 if (rec) {

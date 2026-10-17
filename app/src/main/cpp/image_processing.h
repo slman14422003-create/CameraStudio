@@ -39,6 +39,7 @@ private:
     std::vector<uint8_t> refSmall_; // luma of the reference at 1/4 size
     int sw_, sh_;
     float sigma_ = 4.f;             // noise level of the reference
+    int tile_ = 64;                 // motion search tile (128 for pictures above 20 MP)
 };
 
 }  // namespace cam

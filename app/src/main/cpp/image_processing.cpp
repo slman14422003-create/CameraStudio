@@ -698,11 +698,10 @@ void smallLuma(const uint8_t* rgba, int stride, int w, int h, int sw, int sh, ui
     });
 }
 
-constexpr int kTile = 64;
-
 }  // namespace
 
 Merger::Merger(int w, int h) : w_(w), h_(h), sw_((w + 3) / 4), sh_((h + 3) / 4) {
+    tile_ = (long) w * h > 20000000L ? 128 : 64;
     acc_.assign((size_t) w * h * 3, 0);
     cnt_.assign((size_t) w * h, 0);
 }
@@ -713,7 +712,8 @@ bool Merger::add(const uint8_t* rgba, int stride) {
     std::vector<uint8_t> small((size_t) sw_ * sh_);
     smallLuma(rgba, stride, w_, h_, sw_, sh_, small.data());
 
-    const int tilesX = (w_ + kTile - 1) / kTile, tilesY = (h_ + kTile - 1) / kTile;
+    const int tile = tile_;
+    const int tilesX = (w_ + tile - 1) / tile, tilesY = (h_ + tile - 1) / tile;
     std::vector<int16_t> offX((size_t) tilesX * tilesY, 0), offY((size_t) tilesX * tilesY, 0);
 
     if (n_ == 0) {
@@ -773,7 +773,7 @@ bool Merger::add(const uint8_t* rgba, int stride) {
         parallelFor(tilesY, [&](int ty0, int ty1) {
             for (int ty = ty0; ty < ty1; ty++) {
                 for (int tx = 0; tx < tilesX; tx++) {
-                    int xa = tx * kTile, xb = std::min(w_, xa + kTile), ya = ty * kTile, yb = std::min(h_, ya + kTile);
+                    int xa = tx * tile, xb = std::min(w_, xa + tile), ya = ty * tile, yb = std::min(h_, ya + tile);
                     long bestS = -1;
                     int bxx = dx, byy = dy;
                     for (int ry = -3; ry <= 3; ry++) {
@@ -812,9 +812,9 @@ bool Merger::add(const uint8_t* rgba, int stride) {
 
     parallelFor(h_, [&](int y0, int y1) {
         for (int y = y0; y < y1; y++) {
-            const int ty = y / kTile;
+            const int ty = y / tile;
             for (int x = 0; x < w_; x++) {
-                const size_t ti = (size_t) ty * tilesX + x / kTile;
+                const size_t ti = (size_t) ty * tilesX + x / tile;
                 int sy = y + offY[ti], sx = x + offX[ti];
                 if (sy < 0 || sy >= h_ || sx < 0 || sx >= w_) continue;
                 const uint8_t* p = rgba + (size_t) sy * stride + (size_t) sx * 4;

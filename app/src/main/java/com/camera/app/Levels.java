@@ -27,6 +27,11 @@ final class Levels {
         return new float[]{0.55f, 0.35f, 0.55f, 0.30f, 0.85f};
     }
 
+    /** Deep capture: tens of frames are merged, so the noise is tiny and the detail can be pushed harder. */
+    static float[] deep() {
+        return new float[]{0.28f, 0.45f, 0.80f, 0.30f, 0.55f};
+    }
+
     static int name(String level) {
         switch (level == null ? MEDIUM : level) {
             case OFF:
