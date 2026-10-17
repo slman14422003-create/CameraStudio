@@ -18,6 +18,7 @@ import androidx.camera.core.CameraEffect;
 import androidx.camera.core.SurfaceOutput;
 import androidx.camera.core.SurfaceProcessor;
 import androidx.camera.core.SurfaceRequest;
+import androidx.core.util.Consumer;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -92,6 +93,13 @@ final class VideoFx implements SurfaceProcessor, SurfaceTexture.OnFrameAvailable
     private static final float[] VERTS = {-1f, -1f, 1f, -1f, -1f, 1f, 1f, 1f};
     private static final float[] TEXS = {0f, 0f, 1f, 0f, 0f, 1f, 1f, 1f};
 
+    /** CameraEffect has only protected constructors, so it is subclassed: processes preview and recording. */
+    private static final class Fx extends CameraEffect {
+        Fx(Executor executor, SurfaceProcessor processor, Consumer<Throwable> errors) {
+            super(PREVIEW | VIDEO_CAPTURE, executor, processor, errors);
+        }
+    }
+
     private static final class Out {
         final SurfaceOutput output;
         final EGLSurface surface;
@@ -130,10 +138,7 @@ final class VideoFx implements SurfaceProcessor, SurfaceTexture.OnFrameAvailable
         thread.start();
         handler = new Handler(thread.getLooper());
         executor = r -> handler.post(r);
-        effect = new CameraEffect.Builder(CameraEffect.PREVIEW | CameraEffect.VIDEO_CAPTURE)
-                .setSurfaceProcessor(executor, this)
-                .setErrorListener(t -> failed = true)
-                .build();
+        effect = new Fx(executor, this, t -> failed = true);
     }
 
     CameraEffect effect() {
