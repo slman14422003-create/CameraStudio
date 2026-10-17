@@ -68,7 +68,7 @@ import java.util.concurrent.TimeUnit;
  */
 @SuppressLint("UnsafeOptInUsageError")
 final class CameraEngine {
-    static final int PHOTO = 0, NIGHT = 1, PRO = 2, VIDEO = 3;
+    static final int PHOTO = 0, NIGHT = 1, PRO = 2, VIDEO = 3, HIRES = 4;
 
     interface Listener {
         /** The camera was (re)bound: capabilities below are up to date. */
@@ -441,7 +441,7 @@ final class CameraEngine {
 
     /** True when the full-resolution (e.g. 50 MP) mode is on and usable in the current mode. */
     boolean hiresActive() {
-        return hires && hiresAvailable && (mode == PHOTO || mode == PRO);
+        return hiresAvailable && mode == HIRES;
     }
 
     private static boolean has(int[] a, int v) {
@@ -544,6 +544,7 @@ final class CameraEngine {
             findLenses(base);
             CameraSelector lens = lensSelector(base);
             readCaps(lens);
+            if (mode == HIRES && !hiresAvailable) mode = PHOTO;   // this camera has no full-resolution mode
             hdrAvailable = false;
             try {
                 hdrAvailable = ext != null && ext.isExtensionAvailable(base, ExtensionMode.HDR);
@@ -573,7 +574,10 @@ final class CameraEngine {
                     bind();
                     return;
                 }
-                recorder = new Recorder.Builder().setQualitySelector(QualitySelector.from(videoQuality)).build();
+                int bitrate = videoQuality == Quality.UHD ? 40_000_000 : videoQuality == Quality.FHD ? 16_000_000
+                        : videoQuality == Quality.HD ? 9_000_000 : 4_000_000;
+                recorder = new Recorder.Builder().setQualitySelector(QualitySelector.from(videoQuality))
+                        .setTargetVideoEncodingBitRate(bitrate).build();
                 lastStab = Store.bool(act, "vstab", true);
                 VideoCapture.Builder<Recorder> vb = new VideoCapture.Builder<>(recorder);
                 if (stabSupported) vb.setVideoStabilizationEnabled(lastStab);
@@ -656,7 +660,7 @@ final class CameraEngine {
     // ------------------------------------------------------------------ controls
 
     private int flashForMode() {
-        if (mode != PHOTO || front || !hasFlash) return ImageCapture.FLASH_MODE_OFF;
+        if ((mode != PHOTO && mode != HIRES) || front || !hasFlash) return ImageCapture.FLASH_MODE_OFF;
         return flash;
     }
 

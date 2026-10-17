@@ -77,7 +77,7 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
     private FrameLayout holder;
     private GridView grid;
     private View focusRing;
-    private TextView status, hdrBtn, timerBtn, resBtn, infoPill, countView;
+    private TextView status, hdrBtn, timerBtn, infoPill, countView;
     private LinearLayout lensRow;
     private final List<TextView> lensBtns = new ArrayList<>();
     private final List<Float> lensStops = new ArrayList<>();
@@ -105,7 +105,9 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
     private int tool = T_ISO;
     private int flashState;          // 0 off, 1 auto, 2 on
     private int rotation = Surface.ROTATION_0;
-    private boolean busy, started, wantHires;
+    private boolean busy, started;
+    private LinearLayout bottomBar;
+    private final List<Integer> modeIds = new ArrayList<>();
     private String nightText = "";
     private Uri lastUri;
     private OrientationEventListener orient;
@@ -145,11 +147,9 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         super.onCreate(savedInstanceState);
 
         level = Store.str(this, "level", Levels.MEDIUM);
-        wantHires = Store.bool(this, "hires", false);
         buildUi();
 
         engine = new CameraEngine(this, previewView, this);
-        engine.setHires(wantHires);
 
         orient = new OrientationEventListener(this) {
             @Override
@@ -222,23 +222,6 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         tmp.setMarginStart(dp(6));
         top.addView(timerBtn, tmp);
         top.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1f));
-        resBtn = new TextView(this);
-        resBtn.setTextSize(12.5f);
-        resBtn.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
-        resBtn.setGravity(Gravity.CENTER);
-        resBtn.setPadding(dp(10), dp(5), dp(10), dp(5));
-        resBtn.setOnClickListener(v -> {
-            if (busy || recActive || counting) return;
-            boolean on = !Store.bool(this, "hires", false);
-            Store.setBool(this, "hires", on);
-            wantHires = on;
-            engine.setHires(on);
-            refreshTop();
-        });
-        Ui.press(this, resBtn);
-        LinearLayout.LayoutParams rbp = new LinearLayout.LayoutParams(-2, -2);
-        rbp.setMarginEnd(dp(4));
-        top.addView(resBtn, rbp);
         gridBtn = Ios.navIcon(this, R.drawable.ic_grid, R.string.cam_grid, v -> {
             Store.setBool(this, "grid", !Store.bool(this, "grid", true));
             refreshTop();
@@ -335,6 +318,7 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
 
         // ---- bottom controls
         LinearLayout bottom = new LinearLayout(this);
+        bottomBar = bottom;
         bottom.setOrientation(LinearLayout.VERTICAL);
         bottom.setGravity(Gravity.CENTER);
         col.addView(bottom, new LinearLayout.LayoutParams(-1, 0, 1f));
@@ -367,22 +351,26 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         LinearLayout modes = new LinearLayout(this);
         modes.setOrientation(LinearLayout.HORIZONTAL);
         modes.setGravity(Gravity.CENTER);
-        int[] names = {R.string.cam_mode_photo, R.string.cam_mode_night, R.string.cam_mode_pro, R.string.cam_mode_video};
-        for (int i = 0; i < 4; i++) {
-            final int m = i;
+        final int[] order = {CameraEngine.PHOTO, CameraEngine.HIRES, CameraEngine.NIGHT, CameraEngine.PRO, CameraEngine.VIDEO};
+        final int[] names = {R.string.cam_mode_photo, R.string.cam_mode_photo, R.string.cam_mode_night,
+                R.string.cam_mode_pro, R.string.cam_mode_video};
+        for (int i = 0; i < order.length; i++) {
+            final int m = order[i];
             TextView t = new TextView(this);
-            t.setText(getString(names[i]).toUpperCase(Locale.getDefault()));
+            t.setText(m == CameraEngine.HIRES ? "50 MP" : getString(names[i]).toUpperCase(Locale.getDefault()));
             t.setTextSize(13.5f);
             t.setLetterSpacing(0.05f);
             t.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
-            t.setPadding(dp(16), dp(8), dp(16), dp(8));
+            t.setPadding(dp(14), dp(8), dp(14), dp(8));
             t.setOnClickListener(v -> {
                 v.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
                 setMode(m);
             });
             Ui.press(this, t);
-            styleMode(t, i == 0);
+            styleMode(t, m == CameraEngine.PHOTO);
+            if (m == CameraEngine.HIRES) t.setVisibility(View.GONE);
             modeChips.add(t);
+            modeIds.add(m);
             modes.addView(t);
         }
         LinearLayout.LayoutParams mp = new LinearLayout.LayoutParams(-2, -2);
@@ -838,8 +826,38 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
 
     private void refreshModeUi() {
         int m = engine == null ? CameraEngine.PHOTO : engine.mode();
-        for (int i = 0; i < modeChips.size(); i++) styleMode(modeChips.get(i), i == m);
+        boolean hiOk = engine != null && engine.hiresAvailable;
+        for (int i = 0; i < modeChips.size(); i++) {
+            int id = modeIds.get(i);
+            styleMode(modeChips.get(i), id == m);
+            if (id == CameraEngine.HIRES) {
+                modeChips.get(i).setVisibility(hiOk ? View.VISIBLE : View.GONE);
+                if (hiOk && engine.maxSize != null) {
+                    modeChips.get(i).setText(CamInfo.mpText(engine.maxSize.getWidth(), engine.maxSize.getHeight()));
+                }
+            }
+        }
         boolean vid = m == CameraEngine.VIDEO;
+        if (holder instanceof Ratio34) ((Ratio34) holder).setVideo(vid);
+        LinearLayout.LayoutParams hl = (LinearLayout.LayoutParams) holder.getLayoutParams();
+        int wantMargin = vid ? -dp(130) : 0;
+        if (hl.bottomMargin != wantMargin) {
+            hl.bottomMargin = wantMargin;
+            holder.setLayoutParams(hl);
+        }
+        FrameLayout.LayoutParams zl = (FrameLayout.LayoutParams) lensRow.getLayoutParams();
+        int lensMargin = dp(10) + (vid ? dp(130) : 0);
+        if (zl.bottomMargin != lensMargin) {
+            zl.bottomMargin = lensMargin;
+            lensRow.setLayoutParams(zl);
+        }
+        if (vid) {
+            GradientDrawable scrim = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                    new int[]{0x00000000, 0xB3000000, 0xF2000000});
+            bottomBar.setBackground(scrim);
+        } else {
+            bottomBar.setBackground(null);
+        }
         levelRow.setVisibility(vid ? View.GONE : m == CameraEngine.NIGHT ? View.INVISIBLE : View.VISIBLE);
         videoRow.setVisibility(vid ? View.VISIBLE : View.GONE);
         if (vid && engine != null) rebuildVideoRow();
@@ -858,25 +876,12 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
     }
 
     private void refreshTop() {
-        boolean photo = engine == null || engine.mode() == CameraEngine.PHOTO;
+        boolean photo = engine == null || engine.mode() == CameraEngine.PHOTO || engine.mode() == CameraEngine.HIRES;
         boolean video = engine != null && engine.mode() == CameraEngine.VIDEO;
         boolean canFlash = engine != null && engine.hasFlash && !engine.isFront() && (photo || video);
         flashBtn.setVisibility(canFlash ? View.VISIBLE : View.INVISIBLE);
         int[] icons = {R.drawable.ic_flash_off, R.drawable.ic_flash_auto, R.drawable.ic_flash};
         flashBtn.setImageResource(video ? (engine.torchOn() ? icons[2] : icons[0]) : icons[flashState]);
-        boolean hiOk = engine != null && engine.hiresAvailable && (engine.mode() == CameraEngine.PHOTO
-                || engine.mode() == CameraEngine.PRO);
-        resBtn.setVisibility(hiOk ? View.VISIBLE : View.GONE);
-        if (hiOk) {
-            boolean hi = engine.isHires();
-            android.util.Size z = hi ? engine.maxSize : engine.stdSize;
-            resBtn.setText(z == null ? "" : CamInfo.mpText(z.getWidth(), z.getHeight()));
-            GradientDrawable rg = new GradientDrawable();
-            rg.setCornerRadius(dp(100));
-            rg.setColor(hi ? Ios.YELLOW : Ui.color(this, R.color.neutral_soft));
-            resBtn.setBackground(rg);
-            resBtn.setTextColor(hi ? Color.BLACK : Color.WHITE);
-        }
         if (levelView != null) levelView.setEnabledLine(Store.bool(this, "level_line", true));
         int tsec = Store.num(this, "timer", 0);
         timerBtn.setText(tsec == 0 ? "⏱" : "⏱ " + tsec + "s");
@@ -1419,11 +1424,7 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
     protected void onResume() {
         super.onResume();
         if (orient != null && orient.canDetectOrientation()) orient.enable();
-        boolean h = Store.bool(this, "hires", false);
-        if (h != wantHires) {
-            wantHires = h;
-            engine.setHires(h);
-        }
+
         engine.checkPrefs();
         if (levelView != null) levelView.start();
         level = Store.str(this, "level", level);
@@ -1498,15 +1499,30 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
 
     /** Keeps the preview 3:4 (the photo's shape) whatever the screen is. */
     private static final class Ratio34 extends FrameLayout {
+        private boolean video;
+
         Ratio34(android.content.Context c) {
             super(c);
+        }
+
+        /** Video is recorded 9:16, so its preview is 9:16 too (the controls float over its lower part). */
+        void setVideo(boolean v) {
+            if (video == v) return;
+            video = v;
+            requestLayout();
         }
 
         @Override
         protected void onMeasure(int w, int h) {
             int width = MeasureSpec.getSize(w);
+            int height = width * 4 / 3;
+            if (video) {
+                int avail = MeasureSpec.getSize(h);
+                height = width * 16 / 9;
+                if (avail > 0) height = Math.min(height, avail);
+            }
             super.onMeasure(MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY),
-                    MeasureSpec.makeMeasureSpec(width * 4 / 3, MeasureSpec.EXACTLY));
+                    MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY));
         }
     }
 

@@ -60,7 +60,7 @@
     <string name="set_jpeg">JPEG quality</string>
     <string name="set_hires">High resolution (50 MP)</string>
     <string name="set_hires_sub">Bigger and slower; large photos are saved without processing</string>
-    <string name="set_quality_note">Normal mode captures 12 MP (sensor pixel binning), clearer in low light. 50 MP suits good light and is saved without processing. You can switch from the button above the preview.</string>
+    <string name="set_quality_note">Normal mode captures 12 MP (sensor pixel binning), clearer in low light. The 50 MP mode is a separate entry in the mode strip for good light and is processed too when the phone has enough free memory.</string>
     <string name="set_view">View</string>
     <string name="set_permissions">App permissions</string>
     <string name="set_general">General</string>

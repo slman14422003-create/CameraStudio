@@ -28,8 +28,19 @@ final class Processor {
         void onDone(Uri uri, boolean enhanced);
     }
 
-    /** Photos above this size (the 50 MP mode) are saved untouched: processing them would need > 500 MB. */
+    /** Normal limit; the 50 MP mode is processed too (in bands, about +40 MB) when the phone has free memory. */
     static final long MAX_PIXELS = 20_000_000L;
+
+    private static long limit(Context c) {
+        try {
+            android.app.ActivityManager am = (android.app.ActivityManager) c.getSystemService(Context.ACTIVITY_SERVICE);
+            android.app.ActivityManager.MemoryInfo mi = new android.app.ActivityManager.MemoryInfo();
+            am.getMemoryInfo(mi);
+            if (!mi.lowMemory && mi.availMem > 900L * 1024 * 1024) return 60_000_000L;
+        } catch (Throwable ignored) {
+        }
+        return MAX_PIXELS;
+    }
 
     private static final ExecutorService EXEC = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(r, "cam-processing");
@@ -56,7 +67,7 @@ final class Processor {
             boolean enhanced = false;
             try {
                 float[] p = Native.LOADED ? Levels.params(level) : null;
-                if (p == null || pixels(jpeg) > MAX_PIXELS) {
+                if (p == null || pixels(jpeg) > limit(app)) {
                     uri = Saver.saveJpeg(app, jpeg, jpeg, rotation, 0, 0);
                 } else {
                     Bitmap bmp = decode(jpeg, 1);
