@@ -879,11 +879,6 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         }
     }
 
-    private static String shutterText(long ns) {
-        if (ns >= 950_000_000L) return String.format(Locale.US, "%.1fs", ns / 1e9);
-        return "1/" + Math.max(1, Math.round(1e9 / ns));
-    }
-
     private final Runnable liveInfo = new Runnable() {
         @Override
         public void run() {
