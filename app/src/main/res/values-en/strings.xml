@@ -116,8 +116,8 @@
     <string name="set_vaudio_sub">Record audio with the video</string>
     <string name="set_cam_info">Camera info</string>
     <string name="set_cam_info_sub">Type, pixels and lenses</string>
-    <string name="set_multi">Merge 3 shots per photo</string>
-    <string name="set_multi_sub">Less noise, more detail; off with flash and HDR</string>
+    <string name="set_multi">Automatic frame merge</string>
+    <string name="set_multi_sub">1 to 5 frames depending on the light the phone measures: less noise, more detail; off with flash</string>
     <string name="info_photo">Max photo size</string>
     <string name="set_level_line">Horizon line</string>
     <string name="set_level_line_sub">Shows a line that helps you hold the phone level</string>
@@ -138,4 +138,22 @@
     <string name="deep_res_50">50 MP (needs free memory, otherwise 12 MP is used)</string>
     <string name="deep_hold">Hold the phone still until the count ends. Tap the button to finish early</string>
     <string name="deep_status">Hold still · %d frames</string>
+    <string name="cam_mode_hdr">HDR</string>
+    <string name="hdr_status">Hold still · HDR (3 exposures)</string>
+    <string name="set_proc">Photo processing</string>
+    <string name="set_style">Photo style</string>
+    <string name="style_natural">Natural</string>
+    <string name="style_vivid">Vivid</string>
+    <string name="style_cinematic">Cinematic</string>
+    <string name="style_soft">Soft (faces)</string>
+    <string name="style_mono">Black and white</string>
+    <string name="style_warm">Warm</string>
+    <string name="style_cool">Cool</string>
+    <string name="set_trim_den">Noise reduction</string>
+    <string name="set_trim_sharp">Sharpness</string>
+    <string name="set_trim_tone">Shadow lift and local contrast</string>
+    <string name="set_trim_color">Colour richness</string>
+    <string name="set_dehaze">Dehaze</string>
+    <string name="set_isp">Best sensor pipeline quality</string>
+    <string name="set_isp_sub">Lens shading, hot pixels and tone map at high quality; the shot takes slightly longer</string>
 </resources>

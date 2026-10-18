@@ -32,6 +32,29 @@ void parallelFor(int n, F f) {
     for (auto& th : pool) th.join();
 }
 
+// fast log2 / exp2 (error about 1e-4), used in the per pixel tone code
+inline float fastLog2(float x) {
+    uint32_t i;
+    std::memcpy(&i, &x, 4);
+    float e = (float) ((int) ((i >> 23) & 255) - 127);
+    i = (i & 0x007FFFFFu) | 0x3F800000u;
+    float m;
+    std::memcpy(&m, &i, 4);
+    float p = ((((0.043928628f * m - 0.40947559f) * m + 1.6101775f) * m - 3.5202188f) * m + 5.0697563f) * m - 2.7941537f;
+    return p + e;
+}
+
+inline float fastExp2(float x) {
+    x = clampf(x, -126.f, 126.f);
+    float fl = std::floor(x);
+    float f = x - fl;
+    float p = 1.0f + f * (0.6931472f + f * (0.2402265f + f * (0.0555041f + f * 0.0096181f)));
+    uint32_t i = (uint32_t) ((int) fl + 127) << 23;
+    float sc;
+    std::memcpy(&sc, &i, 4);
+    return p * sc;
+}
+
 inline float lumaF(const uint8_t* p) { return 0.299f * p[0] + 0.587f * p[1] + 0.114f * p[2]; }
 inline int lumaAt(const uint8_t* rgba, int stride, int x, int y) {
     const uint8_t* p = rgba + (size_t) y * stride + (size_t) x * 4;
@@ -81,6 +104,7 @@ struct Global {
     float maxGain = 3.f;               // how much a pixel may be brightened
     float vib = 0.f;                   // vibrance
     bool tone = false;
+    bool mono = false;
 };
 
 constexpr int kCurveN = 1024;
@@ -191,6 +215,12 @@ Global analyse(const uint8_t* rgba, int w, int h, int stride, const EnhanceParam
         }
     }
 
+    // warm / cool
+    if (p.warmth != 0.f) {
+        g.gain[0] *= 1.f + 0.08f * p.warmth;
+        g.gain[2] *= 1.f - 0.08f * p.warmth;
+    }
+
     // tone curve from the luminance distribution (after the white balance gains)
     std::vector<float> Ys(sr.size());
     int hist[256] = {0};
@@ -201,10 +231,12 @@ Global analyse(const uint8_t* rgba, int w, int h, int stride, const EnhanceParam
         hist[clampi((int) (l * 255.f), 0, 255)]++;
     }
     long cum = 0, total = (long) Ys.size();
-    float p50 = 0.4f, p98 = 0.95f;
+    float p50 = 0.4f, p98 = 0.95f, p02 = 0.f;
+    bool got02 = false, got50 = false;
     for (int i = 0; i < 256; i++) {
         cum += hist[i];
-        if (cum * 2 >= total && p50 == 0.4f) p50 = i / 255.f;
+        if (!got02 && cum * 100 >= total * 2) { p02 = i / 255.f; got02 = true; }
+        if (!got50 && cum * 2 >= total) { p50 = i / 255.f; got50 = true; }
         if (cum * 100 >= total * 98) { p98 = i / 255.f; break; }
     }
     p50 = clampf(p50, 0.03f, 0.9f);
@@ -215,8 +247,10 @@ Global analyse(const uint8_t* rgba, int w, int h, int stride, const EnhanceParam
     const float expo = 1.f + (e - 1.f) * G;
     const float ls = 0.50f * T + 0.20f * G;              // shadow lift
     const float hc = 0.55f * T * (p98 > 0.9f ? 1.f : 0.5f);   // highlight recovery
-    const float cs = 0.06f + 0.10f * T;                  // gentle S curve
-    g.tone = (T > 0.f || G > 0.f);
+    const float cs = clampf(0.06f + 0.10f * T + 0.22f * p.contrast, -0.05f, 0.5f);   // S curve
+    const float bp = clampf(p.dehaze * std::min(p02, 0.22f) * 0.9f, 0.f, 0.2f);       // dehaze black point
+    g.tone = (T > 0.f || G > 0.f || p.dehaze > 0.f || p.contrast != 0.f);
+    g.mono = p.mono > 0.5f;
     g.curve.resize(kCurveN);
     float run = 0.f;
     for (int i = 0; i < kCurveN; i++) {
@@ -231,13 +265,14 @@ Global analyse(const uint8_t* rgba, int w, int h, int stride, const EnhanceParam
         }
         float s = y * y * (3.f - 2.f * y);
         y = y + cs * (s - y);
+        if (bp > 0.f) y = (y - bp) / (1.f - bp);
         y = clampf(y, 0.f, 1.f);
         run = std::max(run, y);
         g.curve[i] = run;
     }
-    g.dg = clampf(1.f + 0.18f * T + 0.10f * p.sharpen, 1.f, 1.35f);
+    g.dg = clampf(1.f + 0.18f * T + 0.10f * p.sharpen + 0.12f * p.dehaze, 1.f, 1.45f);
     g.maxGain = 2.2f + 2.2f * G + 1.2f * T;
-    g.vib = 0.16f + 0.22f * T + 0.10f * p.awb;
+    g.vib = clampf(0.16f + 0.22f * T + 0.10f * p.awb + p.vibrance, -0.4f, 1.0f);
 
     // smooth base layer of the luminance
     if (g.tone) {
@@ -482,7 +517,12 @@ void enhance(uint8_t* rgba, int w, int h, int stride, const EnhanceParams& in) {
     p.sharpen = clampf(p.sharpen, 0.f, 1.f);
     p.awb = clampf(p.awb, 0.f, 1.f);
     p.gamma = clampf(p.gamma, 0.f, 1.f);
-    if (p.denoise <= 0.f && p.clahe <= 0.f && p.sharpen <= 0.f && p.awb <= 0.f && p.gamma <= 0.f) return;
+    p.vibrance = clampf(p.vibrance, -0.4f, 1.f);
+    p.contrast = clampf(p.contrast, -0.3f, 1.f);
+    p.warmth = clampf(p.warmth, -1.f, 1.f);
+    p.dehaze = clampf(p.dehaze, 0.f, 1.f);
+    if (p.denoise <= 0.f && p.clahe <= 0.f && p.sharpen <= 0.f && p.awb <= 0.f && p.gamma <= 0.f && p.vibrance == 0.f &&
+        p.contrast == 0.f && p.warmth == 0.f && p.mono <= 0.5f && p.dehaze <= 0.f) return;
 
     const Global g = analyse(rgba, w, h, stride, p);
     // noisier pictures need more filtering than the preset alone asks for
@@ -586,18 +626,18 @@ void enhance(uint8_t* rgba, int w, int h, int stride, const EnhanceParams& in) {
                         float base = std::max(0.004f, sampleBase(g, x, gy));
                         float fb = std::min(curveEval(g, base), base * g.maxGain);
                         float ratio = clampf(Yn / base, 0.25f, 4.f);
-                        Yt = fb * std::pow(ratio, g.dg);
+                        Yt = fb * fastExp2(g.dg * fastLog2(ratio));
                         // very bright pixels must not be pushed over the top
                         Yt = std::min(Yt, 1.f);
                     }
                     // keep the colour strength when the luminance is lifted
                     float lift = Yt / Yn;
-                    float sat = clampf(std::pow(lift, 0.5f), 0.92f, 1.45f);
+                    float sat = clampf(std::sqrt(lift), 0.92f, 1.45f);
                     float mag = std::sqrt(cb * cb + cr * cr) / 90.f;
                     mag = clampf(mag, 0.f, 1.f);
                     float vib = 1.f + g.vib * (1.f - mag) * (1.f - mag);
                     if (cb < -4.f && cb > -52.f && cr > 6.f && cr < 52.f) vib = 1.f + (vib - 1.f) * 0.45f;   // skin
-                    float cs = sat * vib;
+                    float cs = g.mono ? 0.f : sat * vib;
                     yo[x] = Yt * 255.f;
                     gno[x] = clampf(lift, 0.5f, 8.f);
                     cbo[x] = cb * cs;
@@ -853,6 +893,268 @@ void Merger::finish(uint8_t* rgba, int stride) {
             }
         }
     });
+}
+
+// =============================================================== exposure fusion (HDR)
+
+namespace {
+
+// Guided filter with a separate guide image (He et al.): output follows the edges of the guide.
+void guidedFilter(const std::vector<float>& I, const std::vector<float>& P, std::vector<float>& out, int w, int h,
+                  int r, float eps) {
+    const size_t n = (size_t) w * h;
+    std::vector<float> IP(n), II(n), mI, mP, cIP, cII, a(n), b(n), ma, mb;
+    for (size_t i = 0; i < n; i++) {
+        IP[i] = I[i] * P[i];
+        II[i] = I[i] * I[i];
+    }
+    boxMean(I, mI, w, h, r);
+    boxMean(P, mP, w, h, r);
+    boxMean(IP, cIP, w, h, r);
+    boxMean(II, cII, w, h, r);
+    for (size_t i = 0; i < n; i++) {
+        float cov = cIP[i] - mI[i] * mP[i];
+        float var = cII[i] - mI[i] * mI[i];
+        a[i] = cov / (std::max(0.f, var) + eps);
+        b[i] = mP[i] - a[i] * mI[i];
+    }
+    boxMean(a, ma, w, h, r);
+    boxMean(b, mb, w, h, r);
+    out.resize(n);
+    for (size_t i = 0; i < n; i++) out[i] = ma[i] * I[i] + mb[i];
+}
+
+inline int pixY(const uint8_t* f, int stride, int x, int y, int w, int h) {
+    x = clampi(x, 0, w - 1);
+    y = clampi(y, 0, h - 1);
+    const uint8_t* p = f + (size_t) y * stride + (size_t) x * 4;
+    return (77 * p[0] + 150 * p[1] + 29 * p[2]) >> 8;
+}
+
+inline float gradAt(const uint8_t* f, int stride, int x, int y, int w, int h) {
+    return (float) (std::abs(pixY(f, stride, x + 1, y, w, h) - pixY(f, stride, x - 1, y, w, h)) +
+                    std::abs(pixY(f, stride, x, y + 1, w, h) - pixY(f, stride, x, y - 1, w, h)));
+}
+
+// Global shift (dx, dy) of frame b relative to frame a, from the gradient magnitude (it hardly changes with exposure).
+void alignGradient(const uint8_t* a, int sa, const uint8_t* b, int sb, int w, int h, int& dx, int& dy) {
+    const int S = 4, lw = (w + S - 1) / S, lh = (h + S - 1) / S, R = 12;
+    auto lowGrad = [&](const uint8_t* f, int stride, std::vector<float>& g) {
+        std::vector<float> L((size_t) lw * lh, 0.f);
+        for (int y = 0; y < lh; y++)
+            for (int x = 0; x < lw; x++) {
+                int sum = 0, c = 0;
+                for (int j = 0; j < S; j++)
+                    for (int i = 0; i < S; i++) {
+                        int xx = x * S + i, yy = y * S + j;
+                        if (xx < w && yy < h) { sum += pixY(f, stride, xx, yy, w, h); c++; }
+                    }
+                L[(size_t) y * lw + x] = c ? (float) sum / c : 0.f;
+            }
+        g.assign((size_t) lw * lh, 0.f);
+        double mean = 0;
+        for (int y = 1; y < lh - 1; y++)
+            for (int x = 1; x < lw - 1; x++) {
+                float v = std::fabs(L[(size_t) y * lw + x + 1] - L[(size_t) y * lw + x - 1]) +
+                          std::fabs(L[(size_t) (y + 1) * lw + x] - L[(size_t) (y - 1) * lw + x]);
+                g[(size_t) y * lw + x] = v;
+                mean += v;
+            }
+        mean /= std::max(1, (lw - 2) * (lh - 2));
+        float inv = mean > 1e-3 ? (float) (1.0 / mean) : 1.f;
+        for (auto& v : g) v *= inv;
+    };
+    std::vector<float> ga, gb;
+    lowGrad(a, sa, ga);
+    lowGrad(b, sb, gb);
+    double best = -1;
+    int bx = 0, by = 0;
+    const int m = R + 2;
+    for (int sy = -R; sy <= R; sy++)
+        for (int sx = -R; sx <= R; sx++) {
+            double sad = 0;
+            int cnt = 0;
+            for (int y = m; y < lh - m; y += 2)
+                for (int x = m; x < lw - m; x += 2) {
+                    sad += std::fabs(ga[(size_t) y * lw + x] - gb[(size_t) (y + sy) * lw + x + sx]);
+                    cnt++;
+                }
+            if (cnt == 0) continue;
+            sad /= cnt;
+            sad += 0.002 * (std::abs(sx) + std::abs(sy));   // prefer no shift when equally good
+            if (best < 0 || sad < best) { best = sad; bx = sx; by = sy; }
+        }
+    // refine at full resolution (+-3 px) with sparse gradient samples
+    const int margin = 4 * (R + 2) + 8;
+    double meanA = 0, meanB = 0;
+    int cntM = 0;
+    for (int y = margin; y < h - margin; y += 8)
+        for (int x = margin; x < w - margin; x += 8) {
+            meanA += gradAt(a, sa, x, y, w, h);
+            meanB += gradAt(b, sb, x + bx * S, y + by * S, w, h);
+            cntM++;
+        }
+    dx = bx * S;
+    dy = by * S;
+    if (cntM == 0 || meanA < 1e-3 || meanB < 1e-3) return;
+    meanA /= cntM;
+    meanB /= cntM;
+    double best2 = -1;
+    for (int ry = -3; ry <= 3; ry++)
+        for (int rx = -3; rx <= 3; rx++) {
+            double sad = 0;
+            for (int y = margin; y < h - margin; y += 8)
+                for (int x = margin; x < w - margin; x += 8)
+                    sad += std::fabs(gradAt(a, sa, x, y, w, h) / meanA - gradAt(b, sb, x + bx * S + rx, y + by * S + ry, w, h) / meanB);
+            if (best2 < 0 || sad < best2) { best2 = sad; dx = bx * S + rx; dy = by * S + ry; }
+        }
+}
+
+inline float smooth01(float a, float b, float x) {
+    float t = clampf((x - a) / (b - a), 0.f, 1.f);
+    return t * t * (3.f - 2.f * t);
+}
+
+}  // namespace
+
+bool fuse(uint8_t** frames, const int* strides, int n, int w, int h) {
+    if (n < 1 || !frames || w < 8 || h < 8) return false;
+    if (n == 1 || w < 64 || h < 64) return true;
+    const int S = 4, lw = (w + S - 1) / S, lh = (h + S - 1) / S;
+    const size_t ln = (size_t) lw * lh;
+
+    // 1. alignment (frame 0 is the reference)
+    std::vector<int> dx(n, 0), dy(n, 0);
+    for (int i = 1; i < n; i++) alignGradient(frames[0], strides[0], frames[i], strides[i], w, h, dx[i], dy[i]);
+
+    // 2. low resolution measures of every (aligned) frame
+    std::vector<std::vector<float>> L(n, std::vector<float>(ln)), W(n, std::vector<float>(ln));
+    for (int i = 0; i < n; i++) {
+        const uint8_t* f = frames[i];
+        const int st = strides[i];
+        const int ox = dx[i], oy = dy[i];
+        parallelFor(lh, [&](int y0, int y1) {
+            for (int y = y0; y < y1; y++) {
+                for (int x = 0; x < lw; x++) {
+                    float sumL = 0, sumC = 0, sumS = 0;
+                    int c = 0;
+                    for (int j = 0; j < S; j++) {
+                        for (int k = 0; k < S; k++) {
+                            int xx = x * S + k, yy = y * S + j;
+                            if (xx >= w || yy >= h) continue;
+                            int sx = xx + ox, sy = yy + oy;
+                            const uint8_t* p = f + (size_t) clampi(sy, 0, h - 1) * st + (size_t) clampi(sx, 0, w - 1) * 4;
+                            int Y = (77 * p[0] + 150 * p[1] + 29 * p[2]) >> 8;
+                            int lap = std::abs(4 * Y - pixY(f, st, sx - 1, sy, w, h) - pixY(f, st, sx + 1, sy, w, h) -
+                                               pixY(f, st, sx, sy - 1, w, h) - pixY(f, st, sx, sy + 1, w, h));
+                            int mx = std::max(p[0], std::max(p[1], p[2])), mn = std::min(p[0], std::min(p[1], p[2]));
+                            sumL += Y;
+                            sumC += lap;
+                            sumS += mx - mn;
+                            c++;
+                        }
+                    }
+                    size_t idx = (size_t) y * lw + x;
+                    float inv = c ? 1.f / c : 0.f;
+                    float Lm = sumL * inv / 255.f;
+                    L[i][idx] = Lm;
+                    float E = std::exp(-(Lm - 0.5f) * (Lm - 0.5f) / (2.f * 0.2f * 0.2f));
+                    float C = sumC * inv / 255.f;
+                    float Sa = sumS * inv / 255.f;
+                    W[i][idx] = (C + 0.003f) * std::sqrt(Sa + 0.01f) * (E + 0.01f);
+                }
+            }
+        });
+    }
+
+    std::vector<std::vector<float>> Mask(n);
+    // 3. moving objects: where a frame disagrees with the reference (after matching the exposure) trust the reference
+    for (int i = 1; i < n; i++) {
+        std::vector<float> ratios;
+        ratios.reserve(ln / 3 + 1);
+        for (size_t k = 0; k < ln; k += 3) {
+            float a = L[0][k], b = L[i][k];
+            if (a > 0.15f && a < 0.85f && b > 0.1f && b < 0.9f) ratios.push_back(b / a);
+        }
+        if (ratios.size() < 64) continue;
+        std::nth_element(ratios.begin(), ratios.begin() + ratios.size() / 2, ratios.end());
+        float r = ratios[ratios.size() / 2];
+        std::vector<float> M(ln, 0.f), Mb;
+        for (size_t k = 0; k < ln; k++) {
+            float a = L[0][k], b = L[i][k];
+            float expb = r * a;
+            float m = 0.f;
+            if (b > 0.95f) {
+                if (expb < 0.8f) m = 1.f;                    // clipped although it should not be: something bright moved in
+            } else if (a < 0.08f) {
+                if (b > expb + 0.22f) m = 1.f;               // dark in the reference, much brighter here
+            } else if (a < 0.92f && b > 0.04f) {
+                float rel = std::fabs(b - expb) / (std::max(b, expb) + 0.04f);
+                m = smooth01(0.30f, 0.60f, rel);
+            }
+            M[k] = m;
+        }
+        boxMean(M, Mb, lw, lh, 3);                           // grow the mask over the object borders
+        Mask[i].resize(ln);
+        for (size_t k = 0; k < ln; k++) Mask[i][k] = std::min(1.f, 4.f * Mb[k]);
+    }
+
+    // 4. edge aware smoothing of the weights (guide: the reference), then normalisation
+    const int rad = std::max(2, lw / 60);
+    for (int i = 0; i < n; i++) {
+        // scale into a friendly range first
+        float mx = 1e-6f;
+        for (float v : W[i]) mx = std::max(mx, v);
+        for (auto& v : W[i]) v /= mx;
+        std::vector<float> q;
+        guidedFilter(L[0], W[i], q, lw, lh, rad, 0.004f);
+        for (size_t k = 0; k < ln; k++) {
+            float wv = std::max(1e-4f, q[k]);
+            if (!Mask[i].empty()) wv *= 1.f - 0.985f * Mask[i][k];   // after the smoothing so the mask stays sharp
+            W[i][k] = std::max(1e-5f, wv);
+        }
+    }
+    for (size_t k = 0; k < ln; k++) {
+        float sum = 0;
+        for (int i = 0; i < n; i++) sum += W[i][k];
+        float inv = 1.f / sum;
+        for (int i = 0; i < n; i++) W[i][k] *= inv;
+    }
+
+    // 5. blend at full resolution (the result goes into frame 0, every pixel is read before it is written)
+    parallelFor(h, [&](int y0, int y1) {
+        std::vector<float> wv(n);
+        for (int y = y0; y < y1; y++) {
+            float fy = clampf((y + 0.5f) / S - 0.5f, 0.f, lh - 1.f);
+            int ly0 = (int) fy, ly1 = std::min(ly0 + 1, lh - 1);
+            float wy = fy - ly0;
+            uint8_t* out = frames[0] + (size_t) y * strides[0];
+            for (int x = 0; x < w; x++) {
+                float fx = clampf((x + 0.5f) / S - 0.5f, 0.f, lw - 1.f);
+                int lx0 = (int) fx, lx1 = std::min(lx0 + 1, lw - 1);
+                float wx = fx - lx0;
+                float wsum = 0, r = 0, g = 0, b = 0;
+                for (int i = 0; i < n; i++) {
+                    const std::vector<float>& Wi = W[i];
+                    float top = Wi[(size_t) ly0 * lw + lx0] * (1.f - wx) + Wi[(size_t) ly0 * lw + lx1] * wx;
+                    float bot = Wi[(size_t) ly1 * lw + lx0] * (1.f - wx) + Wi[(size_t) ly1 * lw + lx1] * wx;
+                    float wgt = top * (1.f - wy) + bot * wy;
+                    int sx = clampi(x + dx[i], 0, w - 1), sy = clampi(y + dy[i], 0, h - 1);
+                    const uint8_t* p = frames[i] + (size_t) sy * strides[i] + (size_t) sx * 4;
+                    r += wgt * p[0];
+                    g += wgt * p[1];
+                    b += wgt * p[2];
+                    wsum += wgt;
+                }
+                float inv = wsum > 1e-6f ? 1.f / wsum : 0.f;
+                uint8_t* o = out + (size_t) x * 4;
+                o[0] = (uint8_t) clampi((int) (r * inv + 0.5f), 0, 255);
+                o[1] = (uint8_t) clampi((int) (g * inv + 0.5f), 0, 255);
+                o[2] = (uint8_t) clampi((int) (b * inv + 0.5f), 0, 255);
+            }
+        }
+    });
+    return true;
 }
 
 }  // namespace cam

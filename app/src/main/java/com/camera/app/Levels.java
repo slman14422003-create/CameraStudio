@@ -32,6 +32,11 @@ final class Levels {
         return new float[]{0.28f, 0.45f, 0.80f, 0.30f, 0.55f};
     }
 
+    /** HDR: the fusion already balanced the exposure, so only a light tone pass is needed. */
+    static float[] hdr() {
+        return new float[]{0.35f, 0.30f, 0.55f, 0.22f, 0.15f};
+    }
+
     static int name(String level) {
         switch (level == null ? MEDIUM : level) {
             case OFF:

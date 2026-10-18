@@ -116,8 +116,8 @@
     <string name="set_vaudio_sub">تسجيل الصوت مع الفيديو</string>
     <string name="set_cam_info">معلومات الكاميرا</string>
     <string name="set_cam_info_sub">النوع والبكسلات والعدسات</string>
-    <string name="set_multi">دمج 3 لقطات للصورة</string>
-    <string name="set_multi_sub">ضجيج أقل وتفاصيل أوضح؛ يتوقف مع الفلاش وHDR</string>
+    <string name="set_multi">دمج لقطات تلقائي</string>
+    <string name="set_multi_sub">من 1 إلى 5 لقطات حسب الإضاءة التي يقيسها الهاتف: ضجيج أقل وتفاصيل أوضح؛ يتوقف مع الفلاش</string>
     <string name="info_photo">أعلى دقة صورة</string>
     <string name="set_level_line">خط الأفق</string>
     <string name="set_level_line_sub">يظهر خط يساعدك على إمساك الهاتف مستقيماً</string>
@@ -138,4 +138,22 @@
     <string name="deep_res_50">50 ميجابكسل (يحتاج ذاكرة فارغة، وإلا يُستخدم 12)</string>
     <string name="deep_hold">ثبّت هاتفك ولا تحرّكه حتى ينتهي العدّ. اضغط الزر للإنهاء مبكراً</string>
     <string name="deep_status">ثبّت هاتفك · %d لقطة</string>
+    <string name="cam_mode_hdr">HDR</string>
+    <string name="hdr_status">ثبّت هاتفك · HDR (3 تعريضات)</string>
+    <string name="set_proc">معالجة الصور</string>
+    <string name="set_style">نمط الصورة</string>
+    <string name="style_natural">طبيعي</string>
+    <string name="style_vivid">نابض بالألوان</string>
+    <string name="style_cinematic">سينمائي</string>
+    <string name="style_soft">ناعم (للوجوه)</string>
+    <string name="style_mono">أبيض وأسود</string>
+    <string name="style_warm">دافئ</string>
+    <string name="style_cool">بارد</string>
+    <string name="set_trim_den">تقليل الضجيج</string>
+    <string name="set_trim_sharp">الحدّة</string>
+    <string name="set_trim_tone">رفع الظلال والتباين المحلي</string>
+    <string name="set_trim_color">غنى الألوان</string>
+    <string name="set_dehaze">إزالة الضباب</string>
+    <string name="set_isp">أعلى جودة لمعالج الحساس</string>
+    <string name="set_isp_sub">تصحيح العتمة في الزوايا والبكسلات الميتة والتدرجات اللونية؛ التقاط أبطأ قليلاً</string>
 </resources>

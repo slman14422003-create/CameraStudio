@@ -73,7 +73,7 @@ final class Processor {
                     Bitmap bmp = decode(jpeg, 1);
                     if (bmp == null) throw new IOException("decode failed");
                     try {
-                        Native.enhance(bmp, p[0], p[1], p[2], p[3], p[4]);
+                        enhanceBitmap(app, bmp, p);
                         byte[] out = encode(bmp, quality);
                         uri = Saver.saveJpeg(app, out, jpeg, rotation, bmp.getWidth(), bmp.getHeight());
                         enhanced = true;
@@ -123,7 +123,7 @@ final class Processor {
                 }
                 Native.mergeEnd(handle, base);
                 float[] p = params != null ? params : Levels.night();
-                Native.enhance(base, p[0], p[1], p[2], p[3], p[4]);
+                enhanceBitmap(app, base, p);
                 byte[] out = encode(base, quality);
                 uri = Saver.saveJpeg(app, out, first, rotation, w, h);
                 enhanced = true;
@@ -135,6 +135,56 @@ final class Processor {
                 if (base != null) base.recycle();
             }
             finish(d, uri, enhanced);
+        });
+    }
+
+    /** Enhancement with the user's style and fine tuning; falls back to the plain 5 value call. */
+    private static void enhanceBitmap(Context app, Bitmap b, float[] p) {
+        try {
+            if (Native.enhanceEx(b, Style.build(app, p))) return;
+        } catch (Throwable ignored) {
+        }
+        Native.enhance(b, p[0], p[1], p[2], p[3], p[4]);
+    }
+
+    // ============================================================ HDR (exposure fusion)
+
+    /** frames: normal exposure first, then the darker and the brighter one. Saves the fused, enhanced picture. */
+    static void hdr(Context ctx, final List<byte[]> frames, final int rotation, final int quality, Done done) {
+        final Context app = ctx.getApplicationContext();
+        PENDING.incrementAndGet();
+        EXEC.execute(() -> {
+            Uri uri = null;
+            boolean enhanced = false;
+            final Bitmap[] bmps = new Bitmap[Math.max(1, frames.size())];
+            final byte[] first = frames.isEmpty() ? null : frames.get(0);
+            try {
+                if (first == null || !Native.LOADED || pixels(first) > MAX_PIXELS) throw new IOException("hdr not possible");
+                int n = 0;
+                for (byte[] b : frames) {
+                    if (b == null) continue;
+                    Bitmap bm = decode(b, 1);
+                    if (bm == null) continue;
+                    if (n > 0 && (bm.getWidth() != bmps[0].getWidth() || bm.getHeight() != bmps[0].getHeight())) {
+                        bm.recycle();
+                        continue;
+                    }
+                    bmps[n++] = bm;
+                }
+                if (n < 2) throw new IOException("need at least two frames");
+                Bitmap[] use = java.util.Arrays.copyOf(bmps, n);
+                if (!Native.fuse(use)) throw new IOException("fusion failed");
+                enhanceBitmap(app, use[0], Levels.hdr());
+                byte[] out = encode(use[0], quality);
+                uri = Saver.saveJpeg(app, out, first, rotation, use[0].getWidth(), use[0].getHeight());
+                enhanced = true;
+            } catch (Throwable t) {
+                enhanced = false;
+                if (first != null) uri = fallback(app, first, rotation);
+            } finally {
+                for (Bitmap b : bmps) if (b != null) b.recycle();
+            }
+            finish(done, uri, enhanced);
         });
     }
 
@@ -235,7 +285,7 @@ final class Processor {
                 if (base == null) throw new IOException("decode failed");
                 Native.mergeEnd(d.handle, base);
                 float[] p = Levels.deep();
-                Native.enhance(base, p[0], p[1], p[2], p[3], p[4]);
+                enhanceBitmap(app, base, p);
                 byte[] out = encode(base, quality);
                 uri = Saver.saveJpeg(app, out, d.first, d.rotation, base.getWidth(), base.getHeight());
                 enhanced = true;

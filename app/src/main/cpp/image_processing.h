@@ -12,10 +12,21 @@ struct EnhanceParams {
     float sharpen = 0.f;   // 0..1  two scale sharpening with noise coring and halo limit
     float awb = 0.f;       // 0..1  white balance correction
     float gamma = 0.f;     // 0..1  adaptive exposure lift (dark scenes only)
+    // style controls (0 = untouched)
+    float vibrance = 0.f;  // -0.3..0.6 colour richness (weak colours first, skin protected)
+    float contrast = 0.f;  // -0.3..1   S curve strength
+    float warmth = 0.f;    // -1..1     cool .. warm
+    float mono = 0.f;      // >0.5      black and white
+    float dehaze = 0.f;    // 0..1      removes haze: black point + local contrast
 };
 
 // In place, tile (band) based: memory use does not grow with the picture size, so it also works for 50 MP.
 void enhance(uint8_t* rgba, int w, int h, int strideBytes, const EnhanceParams& p);
+
+// Exposure fusion of n differently exposed frames (frame 0 = normal exposure, the reference).
+// Frames are aligned, weighted by well-exposedness / contrast / colour, edge-aware smoothed weights,
+// moving objects are suppressed. The result is written into frame 0. All frames must have the same size.
+bool fuse(uint8_t** frames, const int* strides, int n, int w, int h);
 
 // Noise level (standard deviation in 0..255 luma units) estimated from the picture itself.
 float estimateNoise(const uint8_t* rgba, int w, int h, int strideBytes);

@@ -37,6 +37,7 @@ import android.view.ViewGroup;
 import android.view.GestureDetector;
 import android.widget.FrameLayout;
 import android.widget.HorizontalScrollView;
+import android.widget.HorizontalScrollView;
 import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -88,6 +89,12 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
     private final List<TextView> videoChips = new ArrayList<>();
     private boolean recActive, counting, lastIsVideo, multiShot;
     private float pendingStop = -1f;
+    private HorizontalScrollView modeScroll;
+    private final Handler liveHand = new Handler(Looper.getMainLooper());
+    private boolean hdrRunning;
+    private int hdrIdx, hdrPrevEv, hdrRot;
+    private int[] hdrSteps;
+    private List<byte[]> hdrFrames;
     private Processor.Deep deep;
     private boolean deepRunning, deepStop;
     private long deepEnd;
@@ -368,8 +375,8 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         LinearLayout modes = new LinearLayout(this);
         modes.setOrientation(LinearLayout.HORIZONTAL);
         modes.setGravity(Gravity.CENTER);
-        final int[] order = {CameraEngine.PHOTO, CameraEngine.HIRES, CameraEngine.NIGHT, CameraEngine.DEEP, CameraEngine.PRO, CameraEngine.VIDEO};
-        final int[] names = {R.string.cam_mode_photo, R.string.cam_mode_photo, R.string.cam_mode_night,
+        final int[] order = {CameraEngine.PHOTO, CameraEngine.HDR, CameraEngine.HIRES, CameraEngine.NIGHT, CameraEngine.DEEP, CameraEngine.PRO, CameraEngine.VIDEO};
+        final int[] names = {R.string.cam_mode_photo, R.string.cam_mode_hdr, R.string.cam_mode_photo, R.string.cam_mode_night,
                 R.string.cam_mode_deep, R.string.cam_mode_pro, R.string.cam_mode_video};
         for (int i = 0; i < order.length; i++) {
             final int m = order[i];
@@ -390,9 +397,14 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
             modeIds.add(m);
             modes.addView(t);
         }
-        LinearLayout.LayoutParams mp = new LinearLayout.LayoutParams(-2, -2);
+        modeScroll = new HorizontalScrollView(this);
+        modeScroll.setHorizontalScrollBarEnabled(false);
+        modeScroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        modeScroll.setFillViewport(true);
+        modeScroll.addView(modes, new FrameLayout.LayoutParams(-1, -2));
+        LinearLayout.LayoutParams mp = new LinearLayout.LayoutParams(-1, -2);
         mp.topMargin = dp(6);
-        bottom.addView(modes, mp);
+        bottom.addView(modeScroll, mp);
 
         LinearLayout shutterRow = new LinearLayout(this);
         shutterRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -867,6 +879,19 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         }
     }
 
+    private static String shutterText(long ns) {
+        if (ns >= 950_000_000L) return String.format(Locale.US, "%.1fs", ns / 1e9);
+        return "1/" + Math.max(1, Math.round(1e9 / ns));
+    }
+
+    private final Runnable liveInfo = new Runnable() {
+        @Override
+        public void run() {
+            if (started && engine != null && !recActive && !counting) refreshInfoPill();
+            liveHand.postDelayed(this, 700);
+        }
+    };
+
     private void refreshInfoPill() {
         String t = "";
         if (engine != null && started) {
@@ -879,6 +904,9 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
                 }
             } else if (engine.photoSize != null) {
                 t = CamInfo.mpText(engine.photoSize.getWidth(), engine.photoSize.getHeight());
+                int iso = engine.liveIso();
+                long ns = engine.liveExpNs();
+                if (iso > 0 && ns > 0) t += " · ISO " + iso + " · " + shutterText(ns);
             }
         }
         infoPill.setText(t);
@@ -899,6 +927,12 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
                 if (hiOk && engine.maxSize != null) {
                     modeChips.get(i).setText(CamInfo.mpText(engine.maxSize.getWidth(), engine.maxSize.getHeight()));
                 }
+            }
+        }
+        for (int i = 0; i < modeChips.size(); i++) {
+            if (modeIds.get(i) == m) {
+                final View chip = modeChips.get(i);
+                modeScroll.post(() -> modeScroll.smoothScrollTo(chip.getLeft() - (modeScroll.getWidth() - chip.getWidth()) / 2, 0));
             }
         }
         boolean vid = m == CameraEngine.VIDEO;
@@ -925,7 +959,7 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         } else {
             bottomBar.setBackground(null);
         }
-        levelRow.setVisibility(vid ? View.GONE : (m == CameraEngine.NIGHT || m == CameraEngine.DEEP) ? View.INVISIBLE : View.VISIBLE);
+        levelRow.setVisibility(vid ? View.GONE : (m == CameraEngine.NIGHT || m == CameraEngine.DEEP || m == CameraEngine.HDR) ? View.INVISIBLE : View.VISIBLE);
         videoRow.setVisibility(vid ? View.VISIBLE : View.GONE);
         if (vid && engine != null) rebuildVideoRow();
         proPanel.setVisibility(m == CameraEngine.PRO ? View.VISIBLE : View.GONE);
@@ -1187,6 +1221,90 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         Toast.makeText(this, R.string.cam_video_saved, Toast.LENGTH_SHORT).show();
     }
 
+    /** How many frames to merge, from the light the camera measures: bright 1, dim 3, dark 5. */
+    private int adaptiveFrames() {
+        int iso = engine.liveIso();
+        long ns = engine.liveExpNs();
+        if (iso <= 0 || ns <= 0) return 3;
+        if (iso >= 1000 || ns >= 66_000_000L) return 5;
+        if (iso >= 400 || ns >= 25_000_000L) return 3;
+        return 1;
+    }
+
+    // ---- HDR: three exposures (normal, darker, brighter) fused into one
+
+    private void startHdr() {
+        hdrFrames = new ArrayList<>();
+        hdrPrevEv = engine.evIndex();
+        hdrIdx = 0;
+        hdrSteps = new int[]{engine.evForStops(0f), engine.evForStops(-2f), engine.evForStops(2f)};
+        hdrRunning = true;
+        busy = true;
+        shutter.setBusy(true);
+        nightText = getString(R.string.hdr_status);
+        updateStatus();
+        hdrNext();
+    }
+
+    private void hdrNext() {
+        if (!hdrRunning) return;
+        if (hdrIdx >= hdrSteps.length) {
+            finishHdr();
+            return;
+        }
+        engine.setEv(hdrSteps[hdrIdx]);
+        long wait = hdrIdx == 0 ? 150 : 700;   // the exposure needs a few frames to settle after the change
+        hand.postDelayed(() -> {
+            if (!hdrRunning) return;
+            engine.capture(new ImageCapture.OnImageCapturedCallback() {
+                @Override
+                public void onCaptureSuccess(ImageProxy image) {
+                    byte[] b = jpegBytes(image);
+                    int rot = image.getImageInfo().getRotationDegrees();
+                    image.close();
+                    if (b != null) {
+                        if (hdrFrames.isEmpty()) hdrRot = rot;
+                        hdrFrames.add(b);
+                    }
+                    hdrIdx++;
+                    hand.post(CameraActivity.this::hdrNext);
+                }
+
+                @Override
+                public void onError(ImageCaptureException e) {
+                    hdrIdx++;
+                    hand.post(CameraActivity.this::hdrNext);
+                }
+            });
+        }, wait);
+    }
+
+    private void endHdrState() {
+        hdrRunning = false;
+        engine.setEv(hdrPrevEv);
+        busy = false;
+        shutter.setBusy(false);
+        nightText = "";
+    }
+
+    private void abortHdr() {
+        endHdrState();
+        updateStatus();
+    }
+
+    private void finishHdr() {
+        endHdrState();
+        List<byte[]> frames = hdrFrames;
+        hdrFrames = null;
+        if (frames == null || frames.isEmpty()) {
+            Toast.makeText(this, R.string.cam_error, Toast.LENGTH_SHORT).show();
+            updateStatus();
+            return;
+        }
+        Processor.hdr(this, frames, hdrRot, quality(), done);
+        updateStatus();
+    }
+
     // ---- deep capture: hold still, many frames are merged into one
 
     private final Runnable deepTick = new Runnable() {
@@ -1279,13 +1397,19 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
             startDeep();
             return;
         }
+        if (engine.mode() == CameraEngine.HDR && engine.evSupported && Native.LOADED) {
+            startHdr();
+            return;
+        }
+        int frames = adaptiveFrames();
         if (engine.mode() == CameraEngine.PHOTO && Store.bool(this, "multi_photo", true) && flashState == 0
-                && !Store.bool(this, "hdr", false) && !engine.hiresActive() && Native.LOADED && !Levels.OFF.equals(level)) {
+                && !Store.bool(this, "hdr", false) && !engine.hiresActive() && Native.LOADED && !Levels.OFF.equals(level)
+                && frames > 1) {
             multiShot = true;
             busy = true;
             shutter.setBusy(true);
             flashEffect();
-            nextFrame(0, 3, new ArrayList<>(), new int[]{0});
+            nextFrame(0, frames, new ArrayList<>(), new int[]{0});
             return;
         }
         multiShot = false;
@@ -1587,6 +1711,8 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         if (orient != null && orient.canDetectOrientation()) orient.enable();
 
         engine.checkPrefs();
+        liveHand.removeCallbacks(liveInfo);
+        liveHand.postDelayed(liveInfo, 700);
         if (levelView != null) levelView.start();
         if (engine.mode() == CameraEngine.DEEP) {
             if (!Store.bool(this, "deep_on", false)) engine.setMode(CameraEngine.PHOTO);
@@ -1603,6 +1729,8 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
     @Override
     protected void onPause() {
         if (levelView != null) levelView.stop();
+        liveHand.removeCallbacks(liveInfo);
+        if (hdrRunning) abortHdr();
         if (deepRunning) {
             deepStop = true;
             finishDeep();

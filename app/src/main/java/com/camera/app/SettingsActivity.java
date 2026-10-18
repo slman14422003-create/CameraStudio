@@ -59,6 +59,22 @@ public class SettingsActivity extends BaseActivity {
         content.addView(hi.view);
         content.addView(Ui.footer(this, getString(R.string.set_quality_note)));
 
+        content.addView(Ui.sectionTitle(this, getString(R.string.set_proc)));
+        content.addView(Ui.rowView(this, content, new Row(R.drawable.ic_adjust, false,
+                getString(R.string.set_style), getString(styleName(Store.num(this, "pstyle", 0))), false, true).tint(PINK),
+                v -> pickStyle()));
+        addTrimRow("trim_den", R.string.set_trim_den, ORANGE);
+        addTrimRow("trim_sharp", R.string.set_trim_sharp, TEAL);
+        addTrimRow("trim_tone", R.string.set_trim_tone, BLUE);
+        addTrimRow("trim_color", R.string.set_trim_color, PINK);
+        content.addView(Ui.rowView(this, content, new Row(R.drawable.ic_adjust, false,
+                getString(R.string.set_dehaze), String.valueOf(Store.num(this, "dehaze", 0)), false, true).tint(ORANGE),
+                v -> pickDehaze()));
+        Ui.Toggle ispT = Ui.toggle(this, content, R.string.set_isp, R.string.set_isp_sub,
+                Store.bool(this, "isp_hq", true), R.drawable.ic_camera, GREEN);
+        ispT.onChange((b4, on) -> Store.setBool(this, "isp_hq", on));
+        content.addView(ispT.view);
+
         content.addView(Ui.sectionTitle(this, getString(R.string.set_deep)));
         Ui.Toggle deepT = Ui.toggle(this, content, R.string.set_deep, R.string.set_deep_sub,
                 Store.bool(this, "deep_on", false), R.drawable.ic_camera, TEAL);
@@ -166,6 +182,55 @@ public class SettingsActivity extends BaseActivity {
         }
         new Dlg(this).setTitle(R.string.set_night_frames).setItems(names, (d, which) -> {
             Store.setNum(this, "night_frames", v[which]);
+            render();
+        }).show();
+    }
+
+    private int styleName(int v) {
+        switch (v) {
+            case 1: return R.string.style_vivid;
+            case 2: return R.string.style_cinematic;
+            case 3: return R.string.style_soft;
+            case 4: return R.string.style_mono;
+            case 5: return R.string.style_warm;
+            case 6: return R.string.style_cool;
+            default: return R.string.style_natural;
+        }
+    }
+
+    private void pickStyle() {
+        int cur = Store.num(this, "pstyle", 0);
+        String[] names = new String[7];
+        for (int i = 0; i < 7; i++) names[i] = (i == cur ? "● " : "○ ") + getString(styleName(i));
+        new Dlg(this).setTitle(R.string.set_style).setItems(names, (d, which) -> {
+            Store.setNum(this, "pstyle", which);
+            render();
+        }).show();
+    }
+
+    private void addTrimRow(final String key, final int title, int tint) {
+        int v = Store.num(this, key, 0);
+        content.addView(Ui.rowView(this, content, new Row(R.drawable.ic_adjust, false,
+                getString(title), String.format(java.util.Locale.US, "%+d", v), false, true).tint(tint),
+                x -> pickTrim(key, title)));
+    }
+
+    private void pickTrim(final String key, int title) {
+        int cur = Store.num(this, key, 0);
+        String[] names = new String[5];
+        for (int i = 0; i < 5; i++) names[i] = (i - 2 == cur ? "● " : "○ ") + String.format(java.util.Locale.US, "%+d", i - 2);
+        new Dlg(this).setTitle(title).setItems(names, (d, which) -> {
+            Store.setNum(this, key, which - 2);
+            render();
+        }).show();
+    }
+
+    private void pickDehaze() {
+        int cur = Store.num(this, "dehaze", 0);
+        String[] names = new String[4];
+        for (int i = 0; i < 4; i++) names[i] = (i == cur ? "● " : "○ ") + i;
+        new Dlg(this).setTitle(R.string.set_dehaze).setItems(names, (d, which) -> {
+            Store.setNum(this, "dehaze", which);
             render();
         }).show();
     }

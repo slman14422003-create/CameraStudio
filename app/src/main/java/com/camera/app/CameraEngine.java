@@ -10,7 +10,10 @@ import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraMetadata;
 import android.graphics.ImageFormat;
 import android.util.Rational;
+import android.hardware.camera2.CameraCaptureSession;
 import android.hardware.camera2.CaptureRequest;
+import android.hardware.camera2.CaptureResult;
+import android.hardware.camera2.TotalCaptureResult;
 import android.hardware.camera2.params.StreamConfigurationMap;
 import android.util.Range;
 import android.util.Size;
@@ -71,7 +74,7 @@ import java.util.concurrent.TimeUnit;
  */
 @SuppressLint("UnsafeOptInUsageError")
 final class CameraEngine {
-    static final int PHOTO = 0, NIGHT = 1, PRO = 2, VIDEO = 3, HIRES = 4, DEEP = 5;
+    static final int PHOTO = 0, NIGHT = 1, PRO = 2, VIDEO = 3, HIRES = 4, DEEP = 5, HDR = 6;
 
     interface Listener {
         /** The camera was (re)bound: capabilities below are up to date. */
@@ -154,7 +157,9 @@ final class CameraEngine {
     Size stdSize, maxSize;   // biggest normal 4:3 JPEG (binned, e.g. 12 MP) and biggest overall (e.g. 50 MP)
     boolean hiresAvailable;
     private Range<Integer> nightFps;
-    private boolean nrHq, edgeHq, abHq;
+    private boolean nrHq, edgeHq, abHq, shadeHq, hotHq, toneHq;
+    private volatile int liveIso;
+    private volatile long liveExpNs;
 
     CameraEngine(AppCompatActivity act, PreviewView view, Listener l) {
         this.act = act;
@@ -221,6 +226,20 @@ final class CameraEngine {
         boolean before = hiresActive();
         deepHires = h;
         if (mode == DEEP && before != hiresActive()) bind();
+    }
+
+    int liveIso() {
+        return liveIso;
+    }
+
+    long liveExpNs() {
+        return liveExpNs;
+    }
+
+    /** Exposure compensation index for a number of stops (clamped to what the camera offers). */
+    int evForStops(float stops) {
+        if (evStep <= 0f) return 0;
+        return Math.max(evMin, Math.min(evMax, Math.round(stops / evStep)));
     }
 
     boolean isHires() {
@@ -504,7 +523,7 @@ final class CameraEngine {
     private void readCaps(CameraSelector sel) {
         manualSensor = false;
         manualFocus = false;
-        nrHq = edgeHq = abHq = false;
+        nrHq = edgeHq = abHq = shadeHq = hotHq = toneHq = false;
         rawSupported = false;
         nightFps = null;
         videoQualities.clear();
@@ -560,6 +579,12 @@ final class CameraEngine {
             if (awb != null) for (int m : awb) awbModes.add(m);
             nrHq = has(c2.getCameraCharacteristic(CameraCharacteristics.NOISE_REDUCTION_AVAILABLE_NOISE_REDUCTION_MODES),
                     CameraMetadata.NOISE_REDUCTION_MODE_HIGH_QUALITY);
+            shadeHq = has(c2.getCameraCharacteristic(CameraCharacteristics.SHADING_AVAILABLE_MODES),
+                    CameraMetadata.SHADING_MODE_HIGH_QUALITY);
+            hotHq = has(c2.getCameraCharacteristic(CameraCharacteristics.HOT_PIXEL_AVAILABLE_HOT_PIXEL_MODES),
+                    CameraMetadata.HOT_PIXEL_MODE_HIGH_QUALITY);
+            toneHq = has(c2.getCameraCharacteristic(CameraCharacteristics.TONEMAP_AVAILABLE_TONE_MAP_MODES),
+                    CameraMetadata.TONEMAP_MODE_HIGH_QUALITY);
             edgeHq = has(c2.getCameraCharacteristic(CameraCharacteristics.EDGE_AVAILABLE_EDGE_MODES),
                     CameraMetadata.EDGE_MODE_HIGH_QUALITY);
             abHq = has(c2.getCameraCharacteristic(CameraCharacteristics.COLOR_CORRECTION_AVAILABLE_ABERRATION_MODES),
@@ -681,7 +706,18 @@ final class CameraEngine {
                 ResolutionSelector previewRes = new ResolutionSelector.Builder()
                         .setAspectRatioStrategy(AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY).build();
 
-                Preview preview = new Preview.Builder().setResolutionSelector(previewRes).build();
+                Preview.Builder pb = new Preview.Builder().setResolutionSelector(previewRes);
+                new Camera2Interop.Extender<>(pb).setSessionCaptureCallback(new CameraCaptureSession.CaptureCallback() {
+                    @Override
+                    public void onCaptureCompleted(CameraCaptureSession session, CaptureRequest request,
+                                                   TotalCaptureResult result) {
+                        Integer iso = result.get(CaptureResult.SENSOR_SENSITIVITY);
+                        Long ex = result.get(CaptureResult.SENSOR_EXPOSURE_TIME);
+                        if (iso != null) liveIso = iso;
+                        if (ex != null) liveExpNs = ex;
+                    }
+                });
+                Preview preview = pb.build();
                 preview.setSurfaceProvider(view.getSurfaceProvider());
 
                 ImageCapture.Builder ib = new ImageCapture.Builder()
@@ -696,6 +732,12 @@ final class CameraEngine {
                     if (edgeHq) ex.setCaptureRequestOption(CaptureRequest.EDGE_MODE, CameraMetadata.EDGE_MODE_HIGH_QUALITY);
                     if (abHq) ex.setCaptureRequestOption(CaptureRequest.COLOR_CORRECTION_ABERRATION_MODE,
                             CameraMetadata.COLOR_CORRECTION_ABERRATION_MODE_HIGH_QUALITY);
+                    if (Store.bool(act, "isp_hq", true)) {
+                        // the sensor pipeline at its best for stills: lens shading, hot pixels, tone map
+                        if (shadeHq) ex.setCaptureRequestOption(CaptureRequest.SHADING_MODE, CameraMetadata.SHADING_MODE_HIGH_QUALITY);
+                        if (hotHq) ex.setCaptureRequestOption(CaptureRequest.HOT_PIXEL_MODE, CameraMetadata.HOT_PIXEL_MODE_HIGH_QUALITY);
+                        if (toneHq) ex.setCaptureRequestOption(CaptureRequest.TONEMAP_MODE, CameraMetadata.TONEMAP_MODE_HIGH_QUALITY);
+                    }
                 }
                 capture = ib.build();
 
