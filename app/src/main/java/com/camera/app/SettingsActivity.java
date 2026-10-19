@@ -51,7 +51,7 @@ public class SettingsActivity extends BaseActivity {
                 getString(R.string.set_frames_n, Store.num(this, "night_frames", 6)), false, true).tint(INDIGO),
                 v -> pickFrames()));
         content.addView(Ui.rowView(this, content, new Row(R.drawable.ic_image, false,
-                getString(R.string.set_jpeg), Store.num(this, "jpeg_q", 95) + "%", false, true).tint(ORANGE),
+                getString(R.string.set_jpeg), Store.num(this, "jpeg_q", 100) + "%", false, true).tint(ORANGE),
                 v -> pickJpeg()));
         Ui.Toggle hi = Ui.toggle(this, content, R.string.set_multi, R.string.set_multi_sub,
                 Store.bool(this, "multi_photo", true), R.drawable.ic_aspect, PINK);
@@ -273,7 +273,7 @@ public class SettingsActivity extends BaseActivity {
 
     private void pickJpeg() {
         final int[] v = {90, 95, 100};
-        int cur = Store.num(this, "jpeg_q", 95);
+        int cur = Store.num(this, "jpeg_q", 100);
         String[] names = new String[v.length];
         for (int i = 0; i < v.length; i++) names[i] = (v[i] == cur ? "● " : "○ ") + v[i] + "%";
         new Dlg(this).setTitle(R.string.set_jpeg).setItems(names, (d, which) -> {

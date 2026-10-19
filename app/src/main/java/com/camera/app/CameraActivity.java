@@ -94,6 +94,7 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
     private boolean hdrRunning;
     private int hdrIdx, hdrPrevEv, hdrRot;
     private int[] hdrSteps;
+    private float[] hdrStops;
     private List<byte[]> hdrFrames;
     private Processor.Deep deep;
     private boolean deepRunning, deepStop;
@@ -1232,13 +1233,14 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         hdrFrames = new ArrayList<>();
         hdrPrevEv = engine.evIndex();
         hdrIdx = 0;
-        hdrSteps = new int[]{engine.evForStops(0f), engine.evForStops(-2f), engine.evForStops(2f)};
+        hdrStops = new float[]{0f, -2f, 2f};
+        hdrSteps = new int[]{hdrPrevEv, engine.evFrom(hdrPrevEv, -2f), engine.evFrom(hdrPrevEv, 2f)};
         hdrRunning = true;
         busy = true;
         shutter.setBusy(true);
         nightText = getString(R.string.hdr_status);
         updateStatus();
-        hdrNext();
+        hand.postDelayed(this::hdrNext, 120);
     }
 
     private void hdrNext() {
@@ -1247,31 +1249,69 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
             finishHdr();
             return;
         }
+        if (hdrIdx == 0) {
+            hdrCapture();
+            return;
+        }
+        final double e0 = engine.liveIso() * (double) engine.liveExpNs();
         engine.setEv(hdrSteps[hdrIdx]);
-        long wait = hdrIdx == 0 ? 150 : 700;   // the exposure needs a few frames to settle after the change
-        hand.postDelayed(() -> {
-            if (!hdrRunning) return;
-            engine.capture(new ImageCapture.OnImageCapturedCallback() {
-                @Override
-                public void onCaptureSuccess(ImageProxy image) {
-                    byte[] b = jpegBytes(image);
-                    int rot = image.getImageInfo().getRotationDegrees();
-                    image.close();
-                    if (b != null) {
-                        if (hdrFrames.isEmpty()) hdrRot = rot;
-                        hdrFrames.add(b);
-                    }
-                    hdrIdx++;
-                    hand.post(CameraActivity.this::hdrNext);
-                }
+        hdrSettle(hdrStops[hdrIdx], SystemClock.uptimeMillis(), e0);
+    }
 
-                @Override
-                public void onError(ImageCaptureException e) {
-                    hdrIdx++;
-                    hand.post(CameraActivity.this::hdrNext);
+    private void hdrSettle(final float stops, final long t0, final double e0) {
+        if (!hdrRunning) return;
+        long el = SystemClock.uptimeMillis() - t0;
+        boolean ok;
+        if (e0 <= 0) {
+            ok = el >= 800;
+        } else {
+            double cur = engine.liveIso() * (double) engine.liveExpNs();
+            double st = cur > 0 ? Math.log(cur / e0) / Math.log(2) : 0;
+            ok = stops < 0 ? st <= stops * 0.6 : st >= stops * 0.6;
+            if (el >= 1600) ok = true;
+        }
+        if (!ok) {
+            hand.postDelayed(() -> hdrSettle(stops, t0, e0), 70);
+            return;
+        }
+        hand.postDelayed(this::hdrCapture, 130);
+    }
+
+    private void hdrCapture() {
+        if (!hdrRunning) return;
+        engine.capture(new ImageCapture.OnImageCapturedCallback() {
+            @Override
+            public void onCaptureSuccess(ImageProxy image) {
+                byte[] b = jpegBytes(image);
+                int rot = image.getImageInfo().getRotationDegrees();
+                image.close();
+                if (!hdrRunning || hdrFrames == null) return;
+                if (b != null) {
+                    if (hdrFrames.isEmpty()) {
+                        hdrRot = rot;
+                        float[] st = Processor.exposureStats(b);
+                        if (st != null) {
+                            float under = st[0] > 0.10f ? 3f : st[0] > 0.02f ? 2f : st[0] > 0.004f ? 1.5f : 1f;
+                            float over = st[1] > 0.25f ? 3f : st[1] > 0.08f ? 2f : st[1] > 0.02f ? 1.5f : 1f;
+                            hdrStops[1] = -under;
+                            hdrStops[2] = over;
+                        }
+                        hdrSteps[1] = engine.evFrom(hdrPrevEv, hdrStops[1]);
+                        hdrSteps[2] = engine.evFrom(hdrPrevEv, hdrStops[2]);
+                    }
+                    hdrFrames.add(b);
                 }
-            });
-        }, wait);
+                hdrIdx++;
+                hand.post(CameraActivity.this::hdrNext);
+            }
+
+            @Override
+            public void onError(ImageCaptureException e) {
+                if (!hdrRunning) return;
+                hdrIdx++;
+                hand.post(CameraActivity.this::hdrNext);
+            }
+        });
     }
 
     private void endHdrState() {
@@ -1441,7 +1481,7 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
     }
 
     private int quality() {
-        return Store.num(this, "jpeg_q", 95);
+        return Store.num(this, "jpeg_q", 100);
     }
 
     private final Processor.Done done = (uri, enhanced) -> {

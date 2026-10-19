@@ -32,7 +32,10 @@ final class Saver {
             "ExposureBiasValue", "FocalLength", "FocalLengthIn35mmFilm", "Flash", "WhiteBalance", "ExposureMode",
             "ExposureProgram", "MeteringMode", "ApertureValue", "ShutterSpeedValue", "BrightnessValue",
             "DateTime", "DateTimeOriginal", "DateTimeDigitized", "SubSecTime", "SubSecTimeOriginal",
-            "SubSecTimeDigitized", "SceneCaptureType", "DigitalZoomRatio"
+            "SubSecTimeDigitized", "SceneCaptureType", "DigitalZoomRatio", "OffsetTime", "OffsetTimeOriginal",
+            "OffsetTimeDigitized", "LensSpecification", "MaxApertureValue", "SensingMethod", "CustomRendered",
+            "GainControl", "Contrast", "Saturation", "Sharpness", "SubjectDistanceRange", "GPSLatitude", "GPSLatitudeRef",
+            "GPSLongitude", "GPSLongitudeRef", "GPSAltitude", "GPSAltitudeRef", "GPSTimeStamp", "GPSDateStamp"
     };
 
     static int orientation(int rotationDegrees) {

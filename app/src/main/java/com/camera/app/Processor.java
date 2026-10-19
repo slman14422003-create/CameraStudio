@@ -42,6 +42,51 @@ final class Processor {
         return MAX_PIXELS;
     }
 
+    private static int sharpest(List<byte[]> frames) {
+        int best = 0;
+        double bs = -1;
+        for (int i = 0; i < frames.size(); i++) {
+            byte[] b = frames.get(i);
+            if (b == null) continue;
+            Bitmap bm = null;
+            try {
+                bm = decode(b, 4);
+                if (bm == null) continue;
+                double v = sharpness(bm);
+                if (v > bs * 1.02) {
+                    bs = v;
+                    best = i;
+                }
+            } catch (Throwable ignored) {
+            } finally {
+                if (bm != null) bm.recycle();
+            }
+        }
+        return best;
+    }
+
+    static float[] exposureStats(byte[] jpeg) {
+        Bitmap b = null;
+        try {
+            b = decode(jpeg, 8);
+            if (b == null) return null;
+            int w = b.getWidth(), h = b.getHeight();
+            int[] px = new int[w * h];
+            b.getPixels(px, 0, w, 0, 0, w, h);
+            int hi = 0, lo = 0;
+            for (int p : px) {
+                int y = ((p >> 16 & 255) * 77 + (p >> 8 & 255) * 150 + (p & 255) * 29) >> 8;
+                if (y >= 250) hi++;
+                if (y <= 8) lo++;
+            }
+            return new float[]{hi / (float) px.length, lo / (float) px.length};
+        } catch (Throwable t) {
+            return null;
+        } finally {
+            if (b != null) b.recycle();
+        }
+    }
+
     private static final ExecutorService EXEC = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(r, "cam-processing");
         t.setPriority(Thread.NORM_PRIORITY - 1);
@@ -103,7 +148,20 @@ final class Processor {
             boolean enhanced = false;
             long handle = 0;
             Bitmap base = null;
-            final byte[] first = frames.isEmpty() ? null : frames.get(0);
+            byte[] firstTmp = frames.isEmpty() ? null : frames.get(0);
+            try {
+                if (frames.size() > 2) {
+                    int k = sharpest(frames);
+                    if (k > 0) {
+                        byte[] t = frames.get(k);
+                        frames.set(k, frames.get(0));
+                        frames.set(0, t);
+                        firstTmp = t;
+                    }
+                }
+            } catch (Throwable ignored) {
+            }
+            final byte[] first = firstTmp;
             try {
                 if (first == null) throw new IOException("no frames");
                 if (!Native.LOADED) throw new IOException("no native library");
@@ -159,25 +217,44 @@ final class Processor {
             final Bitmap[] bmps = new Bitmap[Math.max(1, frames.size())];
             final byte[] first = frames.isEmpty() ? null : frames.get(0);
             try {
-                if (first == null || !Native.LOADED || pixels(first) > MAX_PIXELS) throw new IOException("hdr not possible");
-                int n = 0;
-                for (byte[] b : frames) {
-                    if (b == null) continue;
-                    Bitmap bm = decode(b, 1);
-                    if (bm == null) continue;
-                    if (n > 0 && (bm.getWidth() != bmps[0].getWidth() || bm.getHeight() != bmps[0].getHeight())) {
+                if (first == null || !Native.LOADED) throw new IOException("hdr not possible");
+                if (pixels(first) > MAX_PIXELS || frames.size() < 2) {
+                    Bitmap bm = decode(first, 1);
+                    if (bm == null) throw new IOException("decode failed");
+                    try {
+                        enhanceBitmap(app, bm, Levels.hdr());
+                        byte[] out = encode(bm, quality);
+                        uri = Saver.saveJpeg(app, out, first, rotation, bm.getWidth(), bm.getHeight());
+                        enhanced = true;
+                    } finally {
                         bm.recycle();
-                        continue;
                     }
-                    bmps[n++] = bm;
+                } else {
+                    int n = 0;
+                    for (int i = 0; i < frames.size(); i++) {
+                        byte[] b = frames.get(i);
+                        if (b == null) continue;
+                        Bitmap bm = decode(b, 1);
+                        if (bm == null) continue;
+                        if (n > 0 && (bm.getWidth() != bmps[0].getWidth() || bm.getHeight() != bmps[0].getHeight())) {
+                            bm.recycle();
+                            continue;
+                        }
+                        bmps[n++] = bm;
+                        frames.set(i, i == 0 ? b : null);
+                    }
+                    if (n < 2) throw new IOException("need at least two frames");
+                    Bitmap[] use = java.util.Arrays.copyOf(bmps, n);
+                    if (!Native.fuse(use)) throw new IOException("fusion failed");
+                    for (int i = 1; i < n; i++) {
+                        bmps[i].recycle();
+                        bmps[i] = null;
+                    }
+                    enhanceBitmap(app, use[0], Levels.hdr());
+                    byte[] out = encode(use[0], quality);
+                    uri = Saver.saveJpeg(app, out, first, rotation, use[0].getWidth(), use[0].getHeight());
+                    enhanced = true;
                 }
-                if (n < 2) throw new IOException("need at least two frames");
-                Bitmap[] use = java.util.Arrays.copyOf(bmps, n);
-                if (!Native.fuse(use)) throw new IOException("fusion failed");
-                enhanceBitmap(app, use[0], Levels.hdr());
-                byte[] out = encode(use[0], quality);
-                uri = Saver.saveJpeg(app, out, first, rotation, use[0].getWidth(), use[0].getHeight());
-                enhanced = true;
             } catch (Throwable t) {
                 enhanced = false;
                 if (first != null) uri = fallback(app, first, rotation);
@@ -326,7 +403,7 @@ final class Processor {
 
     private static byte[] encode(Bitmap b, int quality) throws IOException {
         ByteArrayOutputStream out = new ByteArrayOutputStream(4 * 1024 * 1024);
-        if (!b.compress(Bitmap.CompressFormat.JPEG, Math.max(60, Math.min(100, quality)), out)) {
+        if (!b.compress(Bitmap.CompressFormat.JPEG, Math.max(70, Math.min(100, quality)), out)) {
             throw new IOException("encode failed");
         }
         return out.toByteArray();

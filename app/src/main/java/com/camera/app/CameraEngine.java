@@ -128,6 +128,8 @@ final class CameraEngine {
     float evStep = 1f;
     // video: aspect (0 = 9:16, 1 = 1:1, 2 = full screen) and the live GPU enhancement
     private boolean deepHires;
+    private int bindFail;
+    private boolean plainRes;
     private VideoFx fx;
     private int fxGen;
     private int vRatio;
@@ -240,6 +242,11 @@ final class CameraEngine {
     int evForStops(float stops) {
         if (evStep <= 0f) return 0;
         return Math.max(evMin, Math.min(evMax, Math.round(stops / evStep)));
+    }
+
+    int evFrom(int base, float stops) {
+        if (evStep <= 0f) return base;
+        return Math.max(evMin, Math.min(evMax, base + Math.round(stops / evStep)));
     }
 
     boolean isHires() {
@@ -692,13 +699,15 @@ final class CameraEngine {
                 // "high resolution" asks CameraX for the full sensor size instead
                 // the exact biggest 4:3 size the camera reports: the normal one (binned, sharper in low light) or,
                 // with the full-resolution switch on, the biggest of all (50 MP on the Galaxy A16)
-                Size target = hiresActive() ? maxSize : stdSize;
+                Size target = plainRes ? null : (hiresActive() ? maxSize : stdSize);
                 ResolutionSelector.Builder rb = new ResolutionSelector.Builder()
                         .setAspectRatioStrategy(AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY)
                         .setAllowedResolutionMode(ResolutionSelector.PREFER_HIGHER_RESOLUTION_OVER_CAPTURE_RATE);
                 if (target != null) {
                     rb.setResolutionStrategy(new ResolutionStrategy(target,
                             ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER));
+                } else if (plainRes) {
+                    rb.setResolutionStrategy(ResolutionStrategy.HIGHEST_AVAILABLE_STRATEGY);
                 } else {
                     rb.setResolutionStrategy(ResolutionStrategy.HIGHEST_AVAILABLE_STRATEGY);
                 }
@@ -721,7 +730,7 @@ final class CameraEngine {
                 preview.setSurfaceProvider(view.getSurfaceProvider());
 
                 ImageCapture.Builder ib = new ImageCapture.Builder()
-                        .setCaptureMode(mode == DEEP ? ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY : ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
+                        .setCaptureMode((mode == DEEP || mode == HDR) ? ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY : ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
                         .setJpegQuality(100)
                         .setResolutionSelector(shotRes)
                         .setFlashMode(flashForMode());
@@ -767,8 +776,28 @@ final class CameraEngine {
                 } catch (Throwable ignored) {
                 }
             }
+            bindFail = 0;
             listener.onBound();
         } catch (Throwable t) {
+            bindFail++;
+            if (bindFail == 1 && extActive) {
+                hdr = false;
+                Store.setBool(act, "hdr", false);
+                bind();
+                return;
+            }
+            if (bindFail <= 2 && (hiresActive() || mode == HIRES || deepHires)) {
+                if (mode == HIRES) mode = PHOTO;
+                deepHires = false;
+                hiresAvailable = false;
+                bind();
+                return;
+            }
+            if (bindFail <= 3 && !plainRes && mode != VIDEO) {
+                plainRes = true;
+                bind();
+                return;
+            }
             listener.onError(String.valueOf(t.getMessage()));
         }
     }

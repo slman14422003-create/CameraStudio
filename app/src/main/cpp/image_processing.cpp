@@ -241,14 +241,26 @@ Global analyse(const uint8_t* rgba, int w, int h, int stride, const EnhanceParam
     }
     p50 = clampf(p50, 0.03f, 0.9f);
 
+    float shadowShare = 0.f, highShare = 0.f;
+    for (int i = 0; i < 256; i++) {
+        if (i < 46) shadowShare += hist[i];
+        if (i > 240) highShare += hist[i];
+    }
+    shadowShare /= std::max(1.f, (float) total);
+    highShare /= std::max(1.f, (float) total);
+    const float needShadow = clampf((shadowShare - 0.06f) / 0.34f, 0.f, 1.f);
+    const float needDark = clampf((0.38f - p50) / 0.22f, 0.f, 1.f);
+    const float need = std::max(0.75f * needShadow, needDark);
+    const float needHigh = clampf((highShare - 0.003f) / 0.04f, 0.f, 1.f);
+
     const float T = p.clahe, G = p.gamma;
-    float e = std::log(0.40f) / std::log(p50);          // exponent that would bring the median to 0.40
+    float e = std::log(0.40f) / std::log(p50);
     e = clampf(e, 0.62f, 1.0f);
-    const float expo = 1.f + (e - 1.f) * G;
-    const float ls = 0.50f * T + 0.20f * G;              // shadow lift
-    const float hc = 0.55f * T * (p98 > 0.9f ? 1.f : 0.5f);   // highlight recovery
-    const float cs = clampf(0.06f + 0.10f * T + 0.22f * p.contrast, -0.05f, 0.5f);   // S curve
-    const float bp = clampf(p.dehaze * std::min(p02, 0.22f) * 0.9f, 0.f, 0.2f);       // dehaze black point
+    const float expo = 1.f + (e - 1.f) * G * needDark;
+    const float ls = (0.50f * T + 0.20f * G) * (0.10f + 0.90f * need);
+    const float hc = 0.55f * T * (0.20f + 0.80f * needHigh);
+    const float cs = clampf(0.10f + 0.10f * T + 0.22f * p.contrast + 0.05f * (1.f - need), -0.05f, 0.5f);
+    const float bp = clampf(p.dehaze * std::min(p02, 0.22f) * 0.9f, 0.f, 0.2f);
     g.tone = (T > 0.f || G > 0.f || p.dehaze > 0.f || p.contrast != 0.f);
     g.mono = p.mono > 0.5f;
     g.curve.resize(kCurveN);
@@ -263,8 +275,8 @@ Global analyse(const uint8_t* rgba, int w, int h, int stride, const EnhanceParam
             float t = (y - k) / (1.f - k);
             y = k + (1.f - k) * t / (1.f + hc * (1.f - t));
         }
-        float s = y * y * (3.f - 2.f * y);
-        y = y + cs * (s - y);
+        float sc = y * y * (3.f - 2.f * y);
+        y = y + cs * (sc - y);
         if (bp > 0.f) y = (y - bp) / (1.f - bp);
         y = clampf(y, 0.f, 1.f);
         run = std::max(run, y);
@@ -632,7 +644,7 @@ void enhance(uint8_t* rgba, int w, int h, int stride, const EnhanceParams& in) {
                     }
                     // keep the colour strength when the luminance is lifted
                     float lift = Yt / Yn;
-                    float sat = clampf(std::sqrt(lift), 0.92f, 1.45f);
+                    float sat = clampf(std::pow(lift, 0.8f), 0.9f, 1.55f);
                     float mag = std::sqrt(cb * cb + cr * cr) / 90.f;
                     mag = clampf(mag, 0.f, 1.f);
                     float vib = 1.f + g.vib * (1.f - mag) * (1.f - mag);
@@ -899,31 +911,6 @@ void Merger::finish(uint8_t* rgba, int stride) {
 
 namespace {
 
-// Guided filter with a separate guide image (He et al.): output follows the edges of the guide.
-void guidedFilter(const std::vector<float>& I, const std::vector<float>& P, std::vector<float>& out, int w, int h,
-                  int r, float eps) {
-    const size_t n = (size_t) w * h;
-    std::vector<float> IP(n), II(n), mI, mP, cIP, cII, a(n), b(n), ma, mb;
-    for (size_t i = 0; i < n; i++) {
-        IP[i] = I[i] * P[i];
-        II[i] = I[i] * I[i];
-    }
-    boxMean(I, mI, w, h, r);
-    boxMean(P, mP, w, h, r);
-    boxMean(IP, cIP, w, h, r);
-    boxMean(II, cII, w, h, r);
-    for (size_t i = 0; i < n; i++) {
-        float cov = cIP[i] - mI[i] * mP[i];
-        float var = cII[i] - mI[i] * mI[i];
-        a[i] = cov / (std::max(0.f, var) + eps);
-        b[i] = mP[i] - a[i] * mI[i];
-    }
-    boxMean(a, ma, w, h, r);
-    boxMean(b, mb, w, h, r);
-    out.resize(n);
-    for (size_t i = 0; i < n; i++) out[i] = ma[i] * I[i] + mb[i];
-}
-
 inline int pixY(const uint8_t* f, int stride, int x, int y, int w, int h) {
     x = clampi(x, 0, w - 1);
     y = clampi(y, 0, h - 1);
@@ -1010,9 +997,203 @@ void alignGradient(const uint8_t* a, int sa, const uint8_t* b, int sb, int w, in
         }
 }
 
+struct Img {
+    int w = 0, h = 0, ch = 0;
+    std::vector<float> d;
+    void init(int W, int H, int C) {
+        w = W;
+        h = H;
+        ch = C;
+        d.assign((size_t) W * H * C, 0.f);
+    }
+    float* plane(int c) { return d.data() + (size_t) c * w * h; }
+    const float* plane(int c) const { return d.data() + (size_t) c * w * h; }
+};
+
 inline float smooth01(float a, float b, float x) {
     float t = clampf((x - a) / (b - a), 0.f, 1.f);
     return t * t * (3.f - 2.f * t);
+}
+
+void downPlane(const float* s, int sw, int sh, float* d, int dw, int dh) {
+    static const float k[5] = {1.f / 16.f, 4.f / 16.f, 6.f / 16.f, 4.f / 16.f, 1.f / 16.f};
+    std::vector<float> tmp((size_t) dw * sh);
+    parallelFor(sh, [&](int y0, int y1) {
+        for (int y = y0; y < y1; y++) {
+            const float* r = s + (size_t) y * sw;
+            float* o = &tmp[(size_t) y * dw];
+            for (int x = 0; x < dw; x++) {
+                float acc = 0.f;
+                for (int i = 0; i < 5; i++) acc += k[i] * r[clampi(2 * x + i - 2, 0, sw - 1)];
+                o[x] = acc;
+            }
+        }
+    });
+    parallelFor(dh, [&](int y0, int y1) {
+        for (int y = y0; y < y1; y++) {
+            float* o = d + (size_t) y * dw;
+            const float* rows[5];
+            for (int j = 0; j < 5; j++) rows[j] = &tmp[(size_t) clampi(2 * y + j - 2, 0, sh - 1) * dw];
+            for (int x = 0; x < dw; x++) {
+                o[x] = k[0] * rows[0][x] + k[1] * rows[1][x] + k[2] * rows[2][x] + k[3] * rows[3][x] + k[4] * rows[4][x];
+            }
+        }
+    });
+}
+
+void downImg(const Img& s, Img& d) {
+    d.init((s.w + 1) / 2, (s.h + 1) / 2, s.ch);
+    for (int c = 0; c < s.ch; c++) downPlane(s.plane(c), s.w, s.h, d.plane(c), d.w, d.h);
+}
+
+inline float upAt(const float* p, int pw, int ph, int x, int y) {
+    const int xi = x >> 1, yi = y >> 1;
+    const int x0 = std::min(xi, pw - 1), y0 = std::min(yi, ph - 1);
+    const int x1 = std::min(x0 + 1, pw - 1), y1 = std::min(y0 + 1, ph - 1);
+    const float wx = (x & 1) ? 0.5f : 0.f, wy = (y & 1) ? 0.5f : 0.f;
+    const float a = p[(size_t) y0 * pw + x0], b = p[(size_t) y0 * pw + x1];
+    const float c = p[(size_t) y1 * pw + x0], e = p[(size_t) y1 * pw + x1];
+    const float top = a + (b - a) * wx, bot = c + (e - c) * wx;
+    return top + (bot - top) * wy;
+}
+
+void downFromFrame(const uint8_t* f, int stride, int w, int h, int dx, int dy, Img& g) {
+    static const float k[5] = {1.f / 16.f, 4.f / 16.f, 6.f / 16.f, 4.f / 16.f, 1.f / 16.f};
+    g.init((w + 1) / 2, (h + 1) / 2, 3);
+    float* pr = g.plane(0);
+    float* pg = g.plane(1);
+    float* pb = g.plane(2);
+    const int gw = g.w;
+    parallelFor(g.h, [&](int y0, int y1) {
+        std::vector<int> xi(5 * (size_t) gw);
+        for (int x = 0; x < gw; x++)
+            for (int i = 0; i < 5; i++) xi[(size_t) x * 5 + i] = clampi(2 * x + i - 2 + dx, 0, w - 1) * 4;
+        for (int y = y0; y < y1; y++) {
+            const uint8_t* rows[5];
+            for (int j = 0; j < 5; j++) rows[j] = f + (size_t) clampi(2 * y + j - 2 + dy, 0, h - 1) * stride;
+            for (int x = 0; x < gw; x++) {
+                const int* ix = &xi[(size_t) x * 5];
+                float r = 0.f, gg = 0.f, b = 0.f;
+                for (int j = 0; j < 5; j++) {
+                    const uint8_t* row = rows[j];
+                    float hr = 0.f, hg = 0.f, hb = 0.f;
+                    for (int i = 0; i < 5; i++) {
+                        const uint8_t* q = row + ix[i];
+                        hr += k[i] * q[0];
+                        hg += k[i] * q[1];
+                        hb += k[i] * q[2];
+                    }
+                    r += k[j] * hr;
+                    gg += k[j] * hg;
+                    b += k[j] * hb;
+                }
+                const size_t o = (size_t) y * gw + x;
+                pr[o] = r;
+                pg[o] = gg;
+                pb[o] = b;
+            }
+        }
+    });
+}
+
+struct ExposureMap {
+    float f[256];
+};
+
+void buildExposureMap(const std::vector<float>& ref, const std::vector<float>& cur, ExposureMap& m) {
+    double sum[256] = {0};
+    int cnt[256] = {0};
+    for (size_t i = 0; i < ref.size(); i++) {
+        float a = ref[i], b = cur[i];
+        if (a < 0.03f || a > 0.97f || b < 0.03f || b > 0.97f) continue;
+        int bin = clampi((int) (a * 255.f + 0.5f), 0, 255);
+        sum[bin] += b;
+        cnt[bin]++;
+    }
+    float mean[256];
+    for (int i = 0; i < 256; i++) mean[i] = cnt[i] ? (float) (sum[i] / cnt[i]) : -1.f;
+    double sum2[256] = {0};
+    int cnt2[256] = {0};
+    for (size_t i = 0; i < ref.size(); i++) {
+        float a = ref[i], b = cur[i];
+        if (a < 0.03f || a > 0.97f || b < 0.03f || b > 0.97f) continue;
+        int bin = clampi((int) (a * 255.f + 0.5f), 0, 255);
+        if (cnt[bin] < 12 || std::fabs(b - mean[bin]) > 0.12f) continue;
+        sum2[bin] += b;
+        cnt2[bin]++;
+    }
+    float val[256];
+    bool ok[256];
+    for (int i = 0; i < 256; i++) {
+        ok[i] = cnt2[i] >= 12;
+        val[i] = ok[i] ? (float) (sum2[i] / cnt2[i]) : 0.f;
+    }
+    int first = -1, last = -1;
+    for (int i = 0; i < 256; i++)
+        if (ok[i]) {
+            if (first < 0) first = i;
+            last = i;
+        }
+    if (first < 0) {
+        for (int i = 0; i < 256; i++) m.f[i] = i / 255.f;
+        return;
+    }
+    for (int i = 0; i < 256; i++) {
+        if (ok[i]) {
+            m.f[i] = val[i];
+        } else if (i < first) {
+            m.f[i] = val[first] * (i / (float) std::max(1, first));
+        } else if (i > last) {
+            m.f[i] = val[last] + (1.f - val[last]) * ((i - last) / (float) std::max(1, 255 - last));
+        } else {
+            int lo = i, hi = i;
+            while (!ok[lo]) lo--;
+            while (!ok[hi]) hi++;
+            float t = (i - lo) / (float) (hi - lo);
+            m.f[i] = val[lo] + (val[hi] - val[lo]) * t;
+        }
+    }
+    float run = 0.f;
+    for (int i = 0; i < 256; i++) {
+        run = std::max(run, m.f[i]);
+        m.f[i] = run;
+    }
+}
+
+inline float mapEval(const ExposureMap& m, float a) {
+    float f = clampf(a, 0.f, 1.f) * 255.f;
+    int i = (int) f;
+    if (i >= 255) return m.f[255];
+    float t = f - i;
+    return m.f[i] + (m.f[i + 1] - m.f[i]) * t;
+}
+
+void weightsFromHalf(const Img& g, std::vector<float>& wOut, std::vector<float>& lumaOut) {
+    const int w = g.w, h = g.h;
+    const size_t n = (size_t) w * h;
+    wOut.assign(n, 0.f);
+    lumaOut.assign(n, 0.f);
+    const float* pr = g.plane(0);
+    const float* pg = g.plane(1);
+    const float* pb = g.plane(2);
+    for (size_t i = 0; i < n; i++) lumaOut[i] = (0.299f * pr[i] + 0.587f * pg[i] + 0.114f * pb[i]) / 255.f;
+    parallelFor(h, [&](int y0, int y1) {
+        for (int y = y0; y < y1; y++) {
+            const float* c = &lumaOut[(size_t) y * w];
+            const float* u = &lumaOut[(size_t) clampi(y - 1, 0, h - 1) * w];
+            const float* d = &lumaOut[(size_t) clampi(y + 1, 0, h - 1) * w];
+            for (int x = 0; x < w; x++) {
+                const size_t i = (size_t) y * w + x;
+                const float lap = std::fabs(4.f * c[x] - c[clampi(x - 1, 0, w - 1)] - c[clampi(x + 1, 0, w - 1)] - u[x] - d[x]);
+                const float r = pr[i] / 255.f, gg = pg[i] / 255.f, b = pb[i] / 255.f;
+                const float m = (r + gg + b) * (1.f / 3.f);
+                const float sat = std::sqrt(((r - m) * (r - m) + (gg - m) * (gg - m) + (b - m) * (b - m)) * (1.f / 3.f));
+                const float er = r - 0.5f, eg = gg - 0.5f, eb = b - 0.5f;
+                const float E = std::exp(-(er * er + eg * eg + eb * eb) / 0.08f);
+                wOut[i] = (lap + 0.004f) * (sat + 0.03f) * (E + 0.0004f);
+            }
+        }
+    });
 }
 
 }  // namespace
@@ -1020,137 +1201,191 @@ inline float smooth01(float a, float b, float x) {
 bool fuse(uint8_t** frames, const int* strides, int n, int w, int h) {
     if (n < 1 || !frames || w < 8 || h < 8) return false;
     if (n == 1 || w < 64 || h < 64) return true;
-    const int S = 4, lw = (w + S - 1) / S, lh = (h + S - 1) / S;
-    const size_t ln = (size_t) lw * lh;
 
-    // 1. alignment (frame 0 is the reference)
     std::vector<int> dx(n, 0), dy(n, 0);
     for (int i = 1; i < n; i++) alignGradient(frames[0], strides[0], frames[i], strides[i], w, h, dx[i], dy[i]);
 
-    // 2. low resolution measures of every (aligned) frame
-    std::vector<std::vector<float>> L(n, std::vector<float>(ln)), W(n, std::vector<float>(ln));
+    const int hw = (w + 1) / 2, hh = (h + 1) / 2;
+    const size_t hn = (size_t) hw * hh;
+    std::vector<std::vector<float>> W(n), L(n);
+    std::vector<std::vector<uint8_t>> Q(n);
+    {
+        Img g;
+        for (int i = 0; i < n; i++) {
+            downFromFrame(frames[i], strides[i], w, h, dx[i], dy[i], g);
+            weightsFromHalf(g, W[i], L[i]);
+            Q[i].resize(hn * 3);
+            for (int c = 0; c < 3; c++) {
+                const float* pl = g.plane(c);
+                uint8_t* q = &Q[i][(size_t) c * hn];
+                for (size_t k = 0; k < hn; k++) q[k] = (uint8_t) clampi((int) (pl[k] + 0.5f), 0, 255);
+            }
+        }
+    }
+
+    for (int i = 1; i < n; i++) {
+        ExposureMap em[3];
+        std::vector<float> ra(hn), rb(hn);
+        for (int c = 0; c < 3; c++) {
+            const uint8_t* qa = &Q[0][(size_t) c * hn];
+            const uint8_t* qb = &Q[i][(size_t) c * hn];
+            for (size_t k = 0; k < hn; k++) {
+                ra[k] = qa[k] * (1.f / 255.f);
+                rb[k] = qb[k] * (1.f / 255.f);
+            }
+            buildExposureMap(ra, rb, em[c]);
+        }
+        std::vector<float> M(hn, 0.f), Mb;
+        for (size_t k = 0; k < hn; k++) {
+            float dmax = 0.f;
+            bool any = false;
+            for (int c = 0; c < 3; c++) {
+                float a = Q[0][(size_t) c * hn + k] * (1.f / 255.f), b = Q[i][(size_t) c * hn + k] * (1.f / 255.f);
+                if (a < 0.05f || a > 0.95f || b < 0.04f || b > 0.96f) continue;
+                any = true;
+                dmax = std::max(dmax, std::fabs(b - mapEval(em[c], a)));
+            }
+            if (any) M[k] = smooth01(0.11f, 0.24f, dmax);
+        }
+        boxMean(M, Mb, hw, hh, std::max(2, hw / 120));
+        for (size_t k = 0; k < hn; k++) {
+            float m = std::min(1.f, 3.f * Mb[k]);
+            W[i][k] *= 1.f - 0.97f * m;
+        }
+    }
+    for (size_t k = 0; k < hn; k++) {
+        float sum = 0.f;
+        for (int i = 0; i < n; i++) sum += W[i][k];
+        float inv = sum > 1e-12f ? 1.f / sum : 1.f / n;
+        for (int i = 0; i < n; i++) W[i][k] = sum > 1e-12f ? W[i][k] * inv : inv;
+    }
+
+    int K = 1;
+    {
+        int lw = hw, lh = hh;
+        while (K < 9 && std::min((lw + 1) / 2, (lh + 1) / 2) >= 6) {
+            lw = (lw + 1) / 2;
+            lh = (lh + 1) / 2;
+            K++;
+        }
+    }
+    std::vector<int> lwv(K + 1), lhv(K + 1);
+    lwv[0] = w;
+    lhv[0] = h;
+    for (int l = 1; l <= K; l++) {
+        lwv[l] = (lwv[l - 1] + 1) / 2;
+        lhv[l] = (lhv[l - 1] + 1) / 2;
+    }
+
+    std::vector<int16_t> R0((size_t) w * h * 3, 0);
+    std::vector<Img> R(K + 1);
+    for (int l = 1; l <= K; l++) R[l].init(lwv[l], lhv[l], 3);
+
     for (int i = 0; i < n; i++) {
+        Img cur;
+        downFromFrame(frames[i], strides[i], w, h, dx[i], dy[i], cur);
         const uint8_t* f = frames[i];
         const int st = strides[i];
         const int ox = dx[i], oy = dy[i];
-        parallelFor(lh, [&](int y0, int y1) {
+        const float* w1 = W[i].data();
+        const float* c0 = cur.plane(0);
+        const float* c1 = cur.plane(1);
+        const float* c2 = cur.plane(2);
+        parallelFor(h, [&](int y0, int y1) {
             for (int y = y0; y < y1; y++) {
-                for (int x = 0; x < lw; x++) {
-                    float sumL = 0, sumC = 0, sumS = 0;
-                    int c = 0;
-                    for (int j = 0; j < S; j++) {
-                        for (int k = 0; k < S; k++) {
-                            int xx = x * S + k, yy = y * S + j;
-                            if (xx >= w || yy >= h) continue;
-                            int sx = xx + ox, sy = yy + oy;
-                            const uint8_t* p = f + (size_t) clampi(sy, 0, h - 1) * st + (size_t) clampi(sx, 0, w - 1) * 4;
-                            int Y = (77 * p[0] + 150 * p[1] + 29 * p[2]) >> 8;
-                            int lap = std::abs(4 * Y - pixY(f, st, sx - 1, sy, w, h) - pixY(f, st, sx + 1, sy, w, h) -
-                                               pixY(f, st, sx, sy - 1, w, h) - pixY(f, st, sx, sy + 1, w, h));
-                            int mx = std::max(p[0], std::max(p[1], p[2])), mn = std::min(p[0], std::min(p[1], p[2]));
-                            sumL += Y;
-                            sumC += lap;
-                            sumS += mx - mn;
-                            c++;
-                        }
-                    }
-                    size_t idx = (size_t) y * lw + x;
-                    float inv = c ? 1.f / c : 0.f;
-                    float Lm = sumL * inv / 255.f;
-                    L[i][idx] = Lm;
-                    float E = std::exp(-(Lm - 0.5f) * (Lm - 0.5f) / (2.f * 0.2f * 0.2f));
-                    float C = sumC * inv / 255.f;
-                    float Sa = sumS * inv / 255.f;
-                    W[i][idx] = (C + 0.003f) * std::sqrt(Sa + 0.01f) * (E + 0.01f);
+                const uint8_t* row = f + (size_t) clampi(y + oy, 0, h - 1) * st;
+                int16_t* o = &R0[(size_t) y * w * 3];
+                for (int x = 0; x < w; x++, o += 3) {
+                    const uint8_t* q = row + (size_t) clampi(x + ox, 0, w - 1) * 4;
+                    const float wt = upAt(w1, hw, hh, x, y);
+                    const float l0 = q[0] - upAt(c0, hw, hh, x, y);
+                    const float l1 = q[1] - upAt(c1, hw, hh, x, y);
+                    const float l2 = q[2] - upAt(c2, hw, hh, x, y);
+                    o[0] = (int16_t) clampi((int) o[0] + (int) std::lrintf(8.f * wt * l0), -32000, 32000);
+                    o[1] = (int16_t) clampi((int) o[1] + (int) std::lrintf(8.f * wt * l1), -32000, 32000);
+                    o[2] = (int16_t) clampi((int) o[2] + (int) std::lrintf(8.f * wt * l2), -32000, 32000);
                 }
             }
         });
-    }
 
-    std::vector<std::vector<float>> Mask(n);
-    // 3. moving objects: where a frame disagrees with the reference (after matching the exposure) trust the reference
-    for (int i = 1; i < n; i++) {
-        std::vector<float> ratios;
-        ratios.reserve(ln / 3 + 1);
-        for (size_t k = 0; k < ln; k += 3) {
-            float a = L[0][k], b = L[i][k];
-            if (a > 0.15f && a < 0.85f && b > 0.1f && b < 0.9f) ratios.push_back(b / a);
-        }
-        if (ratios.size() < 64) continue;
-        std::nth_element(ratios.begin(), ratios.begin() + ratios.size() / 2, ratios.end());
-        float r = ratios[ratios.size() / 2];
-        std::vector<float> M(ln, 0.f), Mb;
-        for (size_t k = 0; k < ln; k++) {
-            float a = L[0][k], b = L[i][k];
-            float expb = r * a;
-            float m = 0.f;
-            if (b > 0.95f) {
-                if (expb < 0.8f) m = 1.f;                    // clipped although it should not be: something bright moved in
-            } else if (a < 0.08f) {
-                if (b > expb + 0.22f) m = 1.f;               // dark in the reference, much brighter here
-            } else if (a < 0.92f && b > 0.04f) {
-                float rel = std::fabs(b - expb) / (std::max(b, expb) + 0.04f);
-                m = smooth01(0.30f, 0.60f, rel);
-            }
-            M[k] = m;
-        }
-        boxMean(M, Mb, lw, lh, 3);                           // grow the mask over the object borders
-        Mask[i].resize(ln);
-        for (size_t k = 0; k < ln; k++) Mask[i][k] = std::min(1.f, 4.f * Mb[k]);
-    }
-
-    // 4. edge aware smoothing of the weights (guide: the reference), then normalisation
-    const int rad = std::max(2, lw / 60);
-    for (int i = 0; i < n; i++) {
-        // scale into a friendly range first
-        float mx = 1e-6f;
-        for (float v : W[i]) mx = std::max(mx, v);
-        for (auto& v : W[i]) v /= mx;
-        std::vector<float> q;
-        guidedFilter(L[0], W[i], q, lw, lh, rad, 0.004f);
-        for (size_t k = 0; k < ln; k++) {
-            float wv = std::max(1e-4f, q[k]);
-            if (!Mask[i].empty()) wv *= 1.f - 0.985f * Mask[i][k];   // after the smoothing so the mask stays sharp
-            W[i][k] = std::max(1e-5f, wv);
-        }
-    }
-    for (size_t k = 0; k < ln; k++) {
-        float sum = 0;
-        for (int i = 0; i < n; i++) sum += W[i][k];
-        float inv = 1.f / sum;
-        for (int i = 0; i < n; i++) W[i][k] *= inv;
-    }
-
-    // 5. blend at full resolution (the result goes into frame 0, every pixel is read before it is written)
-    parallelFor(h, [&](int y0, int y1) {
-        std::vector<float> wv(n);
-        for (int y = y0; y < y1; y++) {
-            float fy = clampf((y + 0.5f) / S - 0.5f, 0.f, lh - 1.f);
-            int ly0 = (int) fy, ly1 = std::min(ly0 + 1, lh - 1);
-            float wy = fy - ly0;
-            uint8_t* out = frames[0] + (size_t) y * strides[0];
-            for (int x = 0; x < w; x++) {
-                float fx = clampf((x + 0.5f) / S - 0.5f, 0.f, lw - 1.f);
-                int lx0 = (int) fx, lx1 = std::min(lx0 + 1, lw - 1);
-                float wx = fx - lx0;
-                float wsum = 0, r = 0, g = 0, b = 0;
-                for (int i = 0; i < n; i++) {
-                    const std::vector<float>& Wi = W[i];
-                    float top = Wi[(size_t) ly0 * lw + lx0] * (1.f - wx) + Wi[(size_t) ly0 * lw + lx1] * wx;
-                    float bot = Wi[(size_t) ly1 * lw + lx0] * (1.f - wx) + Wi[(size_t) ly1 * lw + lx1] * wx;
-                    float wgt = top * (1.f - wy) + bot * wy;
-                    int sx = clampi(x + dx[i], 0, w - 1), sy = clampi(y + dy[i], 0, h - 1);
-                    const uint8_t* p = frames[i] + (size_t) sy * strides[i] + (size_t) sx * 4;
-                    r += wgt * p[0];
-                    g += wgt * p[1];
-                    b += wgt * p[2];
-                    wsum += wgt;
+        std::vector<float> wl(W[i]);
+        int cw = hw, ch = hh;
+        for (int l = 1; l <= K; l++) {
+            Img& acc = R[l];
+            if (l < K) {
+                Img nxt;
+                downImg(cur, nxt);
+                std::vector<float> wn((size_t) nxt.w * nxt.h);
+                downPlane(wl.data(), cw, ch, wn.data(), nxt.w, nxt.h);
+                for (int c = 0; c < 3; c++) {
+                    const float* cp = cur.plane(c);
+                    const float* np = nxt.plane(c);
+                    float* ap = acc.plane(c);
+                    const int nw = nxt.w, nh = nxt.h;
+                    parallelFor(ch, [&](int y0, int y1) {
+                        for (int y = y0; y < y1; y++)
+                            for (int x = 0; x < cw; x++) {
+                                const size_t idx = (size_t) y * cw + x;
+                                ap[idx] += wl[idx] * (cp[idx] - upAt(np, nw, nh, x, y));
+                            }
+                    });
                 }
-                float inv = wsum > 1e-6f ? 1.f / wsum : 0.f;
-                uint8_t* o = out + (size_t) x * 4;
-                o[0] = (uint8_t) clampi((int) (r * inv + 0.5f), 0, 255);
-                o[1] = (uint8_t) clampi((int) (g * inv + 0.5f), 0, 255);
-                o[2] = (uint8_t) clampi((int) (b * inv + 0.5f), 0, 255);
+                cur.d.swap(nxt.d);
+                cur.w = nxt.w;
+                cur.h = nxt.h;
+                wl.swap(wn);
+                cw = nxt.w;
+                ch = nxt.h;
+            } else {
+                for (int c = 0; c < 3; c++) {
+                    const float* cp = cur.plane(c);
+                    float* ap = acc.plane(c);
+                    for (size_t k = 0; k < (size_t) cw * ch; k++) ap[k] += wl[k] * cp[k];
+                }
+            }
+        }
+    }
+
+    Img F;
+    F.w = lwv[K];
+    F.h = lhv[K];
+    F.ch = 3;
+    F.d = R[K].d;
+    for (int l = K - 1; l >= 1; l--) {
+        Img G;
+        G.init(lwv[l], lhv[l], 3);
+        for (int c = 0; c < 3; c++) {
+            const float* fp = F.plane(c);
+            const float* rp = R[l].plane(c);
+            float* gp = G.plane(c);
+            const int fw = F.w, fh = F.h, gw = G.w;
+            parallelFor(G.h, [&](int y0, int y1) {
+                for (int y = y0; y < y1; y++)
+                    for (int x = 0; x < gw; x++) gp[(size_t) y * gw + x] = rp[(size_t) y * gw + x] + upAt(fp, fw, fh, x, y);
+            });
+        }
+        F = std::move(G);
+        R[l].d.clear();
+        R[l].d.shrink_to_fit();
+    }
+    R[K].d.clear();
+    R[K].d.shrink_to_fit();
+
+    const float* f0 = F.plane(0);
+    const float* f1 = F.plane(1);
+    const float* f2 = F.plane(2);
+    const int fw = F.w, fh = F.h;
+    parallelFor(h, [&](int y0, int y1) {
+        for (int y = y0; y < y1; y++) {
+            uint8_t* out = frames[0] + (size_t) y * strides[0];
+            const int16_t* r = &R0[(size_t) y * w * 3];
+            for (int x = 0; x < w; x++, r += 3, out += 4) {
+                const float a = upAt(f0, fw, fh, x, y) + r[0] * 0.125f;
+                const float b = upAt(f1, fw, fh, x, y) + r[1] * 0.125f;
+                const float c = upAt(f2, fw, fh, x, y) + r[2] * 0.125f;
+                out[0] = (uint8_t) clampi((int) (a + 0.5f), 0, 255);
+                out[1] = (uint8_t) clampi((int) (b + 0.5f), 0, 255);
+                out[2] = (uint8_t) clampi((int) (c + 0.5f), 0, 255);
             }
         }
     });
