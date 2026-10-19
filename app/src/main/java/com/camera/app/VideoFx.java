@@ -11,6 +11,8 @@ import android.opengl.GLES11Ext;
 import android.opengl.GLES20;
 import android.os.Handler;
 import android.os.HandlerThread;
+import android.os.Process;
+import android.os.SystemClock;
 import android.util.Size;
 import android.view.Surface;
 
@@ -130,11 +132,13 @@ final class VideoFx implements SurfaceProcessor, SurfaceTexture.OnFrameAvailable
     private SurfaceTexture surfaceTexture;
     private int inW = 1, inH = 1;
     private volatile int frames;
+    private volatile long firstFrameMs;
+    private volatile long lastFrameMs;
     private volatile boolean failed, released;
 
     VideoFx(float strength) {
         this.strength = Math.max(0f, Math.min(1f, strength));
-        thread = new HandlerThread("cam-video-fx");
+        thread = new HandlerThread("cam-video-fx", Process.THREAD_PRIORITY_DISPLAY);
         thread.start();
         handler = new Handler(thread.getLooper());
         executor = r -> handler.post(r);
@@ -151,6 +155,12 @@ final class VideoFx implements SurfaceProcessor, SurfaceTexture.OnFrameAvailable
 
     boolean failed() {
         return failed;
+    }
+
+    float fps() {
+        long span = lastFrameMs - firstFrameMs;
+        if (frames < 8 || span <= 0) return 0f;
+        return (frames - 1) * 1000f / span;
     }
 
     // ---------------------------------------------------------------- SurfaceProcessor
@@ -203,7 +213,11 @@ final class VideoFx implements SurfaceProcessor, SurfaceTexture.OnFrameAvailable
             });
             EGLSurface es = EGL14.eglCreateWindowSurface(display, config, target, new int[]{EGL14.EGL_NONE}, 0);
             if (es == null || es == EGL14.EGL_NO_SURFACE) throw new IllegalStateException("no window surface");
-            outs.add(new Out(output, es, output.getSize()));
+            EGL14.eglMakeCurrent(display, es, es, context);
+            EGL14.eglSwapInterval(display, 0);
+            Out added = new Out(output, es, output.getSize());
+            if ((output.getTargets() & CameraEffect.VIDEO_CAPTURE) != 0) outs.add(0, added);
+            else outs.add(added);
         } catch (Throwable t) {
             failed = true;
             try {
@@ -245,7 +259,12 @@ final class VideoFx implements SurfaceProcessor, SurfaceTexture.OnFrameAvailable
                 EGLExt.eglPresentationTimeANDROID(display, o.surface, ts);
                 EGL14.eglSwapBuffers(display, o.surface);
             }
-            if (!outs.isEmpty()) frames++;
+            if (!outs.isEmpty()) {
+                long now = SystemClock.elapsedRealtime();
+                if (frames == 0) firstFrameMs = now;
+                lastFrameMs = now;
+                frames++;
+            }
         } catch (Throwable t) {
             failed = true;
         }

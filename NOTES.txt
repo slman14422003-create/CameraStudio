@@ -25,3 +25,6 @@
 2026-10-19: HDR fusion rewritten: full-resolution Laplacian pyramid exposure fusion (per-channel exposure matching for moving-object masks), HDR capture waits for the real exposure change (live ISO x shutter) and picks the under/over stops from the clipping of the normal frame, brackets relative to the user's EV, shorter bracket (min latency capture), single-frame and over-size fallbacks processed instead of saved raw
 2026-10-19: tone mapping now adapts to the picture (shadow lift / highlight recovery only when needed, saturation follows the lift), well exposed pictures no longer come out washed out
 2026-10-19: night / multi-shot: sharpest frame becomes the merge reference; camera bind falls back (extension -> standard size -> default size) instead of leaving a dead preview; JPEG default 100%; more EXIF tags kept
+2026-10-19: VIDEO lag: GL effect no longer waits for vsync on every output (swap interval 0), recording surface drawn first, display-priority thread, default live processing now light, and it turns itself off if the measured rate stays under 22 fps
+2026-10-19: VIDEO size: every aspect (9:16, 1:1, full) now goes through one ViewPort so preview and recorded file always share the same crop
+2026-10-19: DEEP: the sharpest of the first 3 frames becomes the merge reference, blurred frames are dropped at 80% of the best sharpness (was 60%)

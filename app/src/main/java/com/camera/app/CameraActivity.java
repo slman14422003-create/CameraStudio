@@ -1812,6 +1812,14 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
                     engine.bind();
                 }
             }, 3500);
+            previewView.postDelayed(() -> {
+                if (engine.fxActive() && engine.fxGen() == gen && engine.mode() == CameraEngine.VIDEO && !recActive
+                        && engine.fxFps() > 0f && engine.fxFps() < 22f) {
+                    Store.setNum(this, "vfx", 0);
+                    Toast.makeText(this, R.string.cam_vfx_failed, Toast.LENGTH_LONG).show();
+                    engine.bind();
+                }
+            }, 7000);
         }
         if (pendingStop > 0f) {
             float z = pendingStop;

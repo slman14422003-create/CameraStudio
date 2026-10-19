@@ -355,6 +355,10 @@ final class CameraEngine {
         return fx == null ? 0 : fx.frames();
     }
 
+    float fxFps() {
+        return fx == null ? 0f : fx.fps();
+    }
+
     boolean fxFailed() {
         return fx != null && fx.failed();
     }
@@ -678,8 +682,8 @@ final class CameraEngine {
                     videoSize = QualitySelector.getResolution(infos.get(0), videoQuality);
                 } catch (Throwable ignored) {
                 }
-                float fxStrength = Store.num(act, "vfx", 2) == 1 ? 0.35f : Store.num(act, "vfx", 2) == 3 ? 0.9f : 0.6f;
-                if (Store.num(act, "vfx", 2) > 0 && Build.VERSION.SDK_INT >= 23) {
+                float fxStrength = Store.num(act, "vfx", 1) == 1 ? 0.35f : Store.num(act, "vfx", 1) == 3 ? 0.9f : 0.6f;
+                if (Store.num(act, "vfx", 1) > 0 && Build.VERSION.SDK_INT >= 23) {
                     try {
                         fx = new VideoFx(fxStrength);
                         fxGen++;
@@ -689,7 +693,7 @@ final class CameraEngine {
                 }
                 UseCaseGroup.Builder gb = new UseCaseGroup.Builder().addUseCase(preview).addUseCase(videoCapture);
                 if (fx != null) gb.addEffect(fx.effect());
-                Rational ratio = vRatio == 1 ? new Rational(1, 1) : vRatio == 2 ? new Rational(vRatioW, vRatioH) : null;
+                Rational ratio = vRatio == 1 ? new Rational(1, 1) : vRatio == 2 ? new Rational(vRatioW, vRatioH) : new Rational(9, 16);
                 if (ratio != null) {
                     gb.setViewPort(new ViewPort.Builder(ratio, act.getWindowManager().getDefaultDisplay().getRotation()).build());
                 }

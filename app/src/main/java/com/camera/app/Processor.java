@@ -277,6 +277,7 @@ final class Processor {
         int w, h;
         int merged;
         double best;
+        final List<byte[]> buffer = new java.util.ArrayList<>();
     }
 
     static Deep deepBegin() {
@@ -310,36 +311,61 @@ final class Processor {
         return acc / (cw * ch);
     }
 
-    /** Queues one frame; it is decoded, checked for sharpness and merged on the processing thread. */
+    private static void deepAddFrame(Deep d, byte[] jpeg) {
+        Bitmap b = decode(jpeg, 1);
+        if (b == null) return;
+        try {
+            if (b.getWidth() != d.w || b.getHeight() != d.h) return;
+            double s = sharpness(b);
+            if (s >= d.best * 0.8 && Native.mergeAdd(d.handle, b)) {
+                d.merged++;
+                if (s > d.best) d.best = s;
+            }
+        } finally {
+            b.recycle();
+        }
+    }
+
+    private static void deepInit(Deep d) {
+        if (d.handle != 0 || d.buffer.isEmpty()) return;
+        int k = d.buffer.size() > 1 ? sharpest(d.buffer) : 0;
+        byte[] ref = d.buffer.get(k);
+        Bitmap b = decode(ref, 1);
+        if (b == null) {
+            d.failed = true;
+            return;
+        }
+        try {
+            d.w = b.getWidth();
+            d.h = b.getHeight();
+            d.handle = Native.mergeBegin(d.w, d.h);
+            if (d.handle == 0 || !Native.mergeAdd(d.handle, b)) {
+                d.failed = true;
+                return;
+            }
+            d.first = ref;
+            d.best = sharpness(b);
+            d.merged = 1;
+        } finally {
+            b.recycle();
+        }
+        for (int i = 0; i < d.buffer.size(); i++) {
+            if (i != k) deepAddFrame(d, d.buffer.get(i));
+        }
+        d.buffer.clear();
+    }
+
     static void deepAdd(final Deep d, final byte[] jpeg) {
         d.pending.incrementAndGet();
         EXEC.execute(() -> {
             try {
                 if (d.failed || !Native.LOADED) return;
-                Bitmap b = decode(jpeg, 1);
-                if (b == null) return;
-                try {
-                    if (d.handle == 0) {
-                        d.w = b.getWidth();
-                        d.h = b.getHeight();
-                        d.handle = Native.mergeBegin(d.w, d.h);
-                        if (d.handle == 0 || !Native.mergeAdd(d.handle, b)) {
-                            d.failed = true;
-                            return;
-                        }
-                        d.first = jpeg;
-                        d.best = sharpness(b);
-                        d.merged = 1;
-                    } else if (b.getWidth() == d.w && b.getHeight() == d.h) {
-                        double s = sharpness(b);
-                        if (s >= d.best * 0.6 && Native.mergeAdd(d.handle, b)) {
-                            d.merged++;
-                            if (s > d.best) d.best = s;
-                        }
-                    }
-                } finally {
-                    b.recycle();
+                if (d.handle == 0) {
+                    d.buffer.add(jpeg);
+                    if (d.buffer.size() >= 3) deepInit(d);
+                    return;
                 }
+                deepAddFrame(d, jpeg);
             } catch (Throwable t) {
                 d.failed = true;
             } finally {
@@ -357,6 +383,7 @@ final class Processor {
             boolean enhanced = false;
             Bitmap base = null;
             try {
+                if (d.handle == 0) deepInit(d);
                 if (d.handle == 0 || d.first == null) throw new IOException("no frames");
                 base = decode(d.first, 1);
                 if (base == null) throw new IOException("decode failed");
