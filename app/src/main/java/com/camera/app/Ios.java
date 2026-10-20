@@ -94,6 +94,22 @@ final class Ios {
         ((TextView) item.getChildAt(1)).setTextColor(Ui.color(c, on ? R.color.accent : R.color.text_secondary));
     }
 
+    static LinearLayout toolItemDark(Context c, int icon, CharSequence label) {
+        LinearLayout item = toolItem(c, icon, label);
+        setToolSelectedDark(c, item, false);
+        return item;
+    }
+
+    static void setToolSelectedDark(Context c, LinearLayout item, boolean on) {
+        ImageView iv = (ImageView) item.getChildAt(0);
+        GradientDrawable g = new GradientDrawable();
+        g.setShape(GradientDrawable.OVAL);
+        g.setColor(on ? YELLOW : 0xCC2C2C2E);
+        iv.setBackground(g);
+        iv.setImageTintList(ColorStateList.valueOf(on ? 0xFF000000 : 0xFFFFFFFF));
+        ((TextView) item.getChildAt(1)).setTextColor(on ? YELLOW : 0xCCFFFFFF);
+    }
+
     /** Small round icon button used inside tool panels (rotate, flip). */
     static ImageButton panelIcon(Context c, int icon, int desc, View.OnClickListener click) {
         ImageButton b = new ImageButton(c);

@@ -80,7 +80,7 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
     private GridView grid;
     private View focusRing;
     private TextView status, hdrBtn, timerBtn, infoPill, countView, ratioPill;
-    private int vKind, pKind;
+    private int vKind, pKind, insetTop, insetBottom;
     private LinearLayout lensRow;
     private LinearLayout topBar, optPanel;
     private ImageButton chevron;
@@ -183,6 +183,19 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         super.onCreate(savedInstanceState);
 
         level = Store.str(this, "level", Levels.MEDIUM);
+        try {
+            WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
+            getWindow().setStatusBarColor(Color.TRANSPARENT);
+            getWindow().setNavigationBarColor(Color.TRANSPARENT);
+            if (android.os.Build.VERSION.SDK_INT >= 29) {
+                getWindow().setNavigationBarContrastEnforced(false);
+                getWindow().setStatusBarContrastEnforced(false);
+            }
+            if (android.os.Build.VERSION.SDK_INT >= 28) {
+                getWindow().getAttributes().layoutInDisplayCutoutMode = android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+            }
+        } catch (Throwable ignored) {
+        }
         buildUi();
 
         engine = new CameraEngine(this, previewView, this);
@@ -232,6 +245,20 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         col.setOrientation(LinearLayout.VERTICAL);
         root.addView(col, new FrameLayout.LayoutParams(-1, -1));
         colView = col;
+        root.setOnApplyWindowInsetsListener((v, ins) -> {
+            insetTop = ins.getSystemWindowInsetTop();
+            insetBottom = ins.getSystemWindowInsetBottom();
+            if (topBar != null) topBar.setPadding(dp(12), dp(6) + insetTop, dp(12), dp(6));
+            if (pod != null) {
+                LinearLayout.LayoutParams pp2 = (LinearLayout.LayoutParams) pod.getLayoutParams();
+                pp2.bottomMargin = dp(10) + insetBottom;
+                pod.setLayoutParams(pp2);
+            }
+            if (colView != null) colView.post(() -> {
+                if (engine != null) refreshModeUi();
+            });
+            return ins;
+        });
         col.addOnLayoutChangeListener((v, l, t, r, bt, ol, ot, or2, ob) -> {
             if (bt - t != ob - ot) v.post(this::fitFloating);
         });
@@ -301,6 +328,12 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         previewView.setScaleType(PreviewView.ScaleType.FIT_CENTER);
         previewView.setImplementationMode(PreviewView.ImplementationMode.PERFORMANCE);
         holder.addView(previewView, new FrameLayout.LayoutParams(-1, -1));
+        View topScrim = new View(this);
+        topScrim.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[]{0x80000000, 0x00000000}));
+        holder.addView(topScrim, new FrameLayout.LayoutParams(-1, dp(150), Gravity.TOP));
+        View botScrim = new View(this);
+        botScrim.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[]{0x00000000, 0x99000000}));
+        holder.addView(botScrim, new FrameLayout.LayoutParams(-1, dp(300), Gravity.BOTTOM));
         grid = new GridView(this);
         holder.addView(grid, new FrameLayout.LayoutParams(-1, -1));
         levelView = new LevelView(this);
@@ -408,7 +441,7 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         TextView lbl = new TextView(this);
         lbl.setText(R.string.cam_processing);
         lbl.setTextSize(13);
-        lbl.setTextColor(Ui.color(this, R.color.text_secondary));
+        lbl.setTextColor(0xB3FFFFFF);
         lbl.setPaddingRelative(0, 0, dp(10), 0);
         levelRow.addView(lbl);
         for (final String l : Levels.ALL) {
@@ -469,7 +502,7 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         pod.setOrientation(LinearLayout.VERTICAL);
         GradientDrawable pg = new GradientDrawable();
         pg.setCornerRadius(dp(40));
-        pg.setColor(0xB31C1C1E);
+        pg.setColor(0xCC141416);
         pg.setStroke(Ios.hairPx(this), 0x22FFFFFF);
         pod.setBackground(pg);
         pod.setPadding(0, dp(4), 0, dp(14));
@@ -559,10 +592,11 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         t.setTextSize(13);
         t.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         t.setGravity(Gravity.CENTER);
-        t.setPadding(dp(14), dp(6), dp(14), dp(6));
+        t.setPadding(dp(12), dp(5), dp(12), dp(5));
         GradientDrawable g = new GradientDrawable();
         g.setCornerRadius(dp(100));
-        g.setColor(0x66000000);
+        g.setColor(0x73000000);
+        g.setStroke(Ios.hairPx(this), 0x26FFFFFF);
         t.setBackground(g);
         return t;
     }
@@ -676,7 +710,7 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         toolRow.removeAllViews();
         toolItems.clear();
         toolIds.clear();
-        autoItem = Ios.toolItem(this, R.drawable.ic_wand, getString(R.string.pro_auto));
+        autoItem = Ios.toolItemDark(this, R.drawable.ic_wand, getString(R.string.pro_auto));
         autoItem.setOnClickListener(v -> {
             engine.manual = false;
             engine.focus = -1f;
@@ -720,7 +754,7 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
     }
 
     private void addTool(final int id, int icon, int label) {
-        LinearLayout it = Ios.toolItem(this, icon, getString(label));
+        LinearLayout it = Ios.toolItemDark(this, icon, getString(label));
         it.setOnClickListener(v -> {
             tool = id;
             refreshPro();
@@ -735,8 +769,8 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         if (proPanel == null) return;
         boolean any = !toolIds.isEmpty();
         boolean autoOnly = !engine.manual && engine.awbMode == 1 && engine.focus < 0f;
-        Ios.setToolSelected(this, autoItem, autoOnly);
-        for (int i = 0; i < toolItems.size(); i++) Ios.setToolSelected(this, toolItems.get(i), toolIds.get(i) == tool);
+        Ios.setToolSelectedDark(this, autoItem, autoOnly);
+        for (int i = 0; i < toolItems.size(); i++) Ios.setToolSelectedDark(this, toolItems.get(i), toolIds.get(i) == tool);
         boolean wb = tool == T_WB;
         slider.setVisibility(any && !wb ? View.VISIBLE : View.GONE);
         sliderValue.setVisibility(any && !wb ? View.VISIBLE : View.GONE);
@@ -782,13 +816,13 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
                 else engine.expNs = progressToLog(p, engine.expMin, engine.expMax);
                 engine.applyOptions();
                 sliderValue.setText(tool == T_ISO ? ("ISO " + engine.iso) : shutterText(engine.expNs));
-                Ios.setToolSelected(this, autoItem, false);
+                Ios.setToolSelectedDark(this, autoItem, false);
                 break;
             case T_FOCUS:
                 engine.focus = p == 0 ? -1f : progressToFocus(p);
                 engine.applyOptions();
                 sliderValue.setText(focusText(engine.focus));
-                Ios.setToolSelected(this, autoItem, false);
+                Ios.setToolSelectedDark(this, autoItem, false);
                 break;
             case T_EV:
                 int idx = engine.evMin + p;

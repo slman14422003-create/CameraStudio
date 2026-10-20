@@ -406,9 +406,8 @@ public final class Ui {
         icon.setImageResource(R.drawable.ic_brand_mark);   // the blue flower, same as the launcher icon
         icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
         GradientDrawable g = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[]{0xFFFFFFFF, 0xFFEAF3FF});
-        g.setCornerRadius(dp(c, 20));
-        g.setStroke(1, 0x14000000);
+                new int[]{0x00000000, 0x00000000});
+        g.setCornerRadius(dp(c, 22));
         icon.setBackground(g);
         icon.setClipToOutline(true);
         box.addView(icon, new LinearLayout.LayoutParams(dp(c, 84), dp(c, 84)));

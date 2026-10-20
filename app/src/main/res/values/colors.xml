@@ -23,5 +23,5 @@
     <color name="brand_end">#007AFF</color>
     <color name="ok">#34C759</color>
     <color name="bad">#FF3B30</color>
-    <color name="ic_launcher_bg">#F7FAFF</color>
+    <color name="ic_launcher_bg">#000000</color>
 </resources>
