@@ -87,6 +87,32 @@ final class Processor {
         }
     }
 
+    private static void dropBlurred(List<byte[]> frames) {
+        double[] sc = new double[frames.size()];
+        double best = 0;
+        for (int i = 0; i < sc.length; i++) {
+            byte[] b = frames.get(i);
+            if (b == null) continue;
+            Bitmap bm = null;
+            try {
+                bm = decode(b, 4);
+                if (bm != null) sc[i] = sharpness(bm);
+            } catch (Throwable ignored) {
+            } finally {
+                if (bm != null) bm.recycle();
+            }
+            best = Math.max(best, sc[i]);
+        }
+        if (best <= 0) return;
+        int keep = 0;
+        for (double v : sc) if (v >= best * 0.72) keep++;
+        if (keep < 2) return;
+        for (int i = frames.size() - 1; i >= 1; i--) {
+            if (sc[i] < best * 0.72) frames.remove(i);
+        }
+        if (sc[0] < best * 0.72 && frames.size() > 1) frames.remove(0);
+    }
+
     private static final ExecutorService EXEC = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(r, "cam-processing");
         t.setPriority(Thread.NORM_PRIORITY - 1);
@@ -104,14 +130,27 @@ final class Processor {
         if (d != null) MAIN.post(() -> d.onDone(uri, enhanced));
     }
 
+    static volatile float zoom = 1f;
+    static volatile boolean portrait;
+
+    private static float[] zoomed(float[] p, float z) {
+        if (p == null || z <= 1.05f) return p;
+        float[] q = p.clone();
+        q[2] = Math.min(1.0f, q[2] + Math.min(0.40f, 0.20f * (z - 1f)));
+        q[0] = Math.max(0f, q[0] - Math.min(0.20f, 0.07f * (z - 1f)));
+        return q;
+    }
+
     static void shot(Context ctx, byte[] jpeg, int rotation, String level, int quality, Done d) {
         final Context app = ctx.getApplicationContext();
+        final float zm = zoom;
+        final boolean por = portrait;
         PENDING.incrementAndGet();
         EXEC.execute(() -> {
             Uri uri = null;
             boolean enhanced = false;
             try {
-                float[] p = Native.LOADED ? Levels.params(level) : null;
+                float[] p = Native.LOADED ? zoomed(Levels.params(level), zm) : null;
                 if (p == null || pixels(jpeg) > limit(app)) {
                     uri = Saver.saveJpeg(app, jpeg, jpeg, rotation, 0, 0);
                 } else {
@@ -119,6 +158,7 @@ final class Processor {
                     if (bmp == null) throw new IOException("decode failed");
                     try {
                         enhanceBitmap(app, bmp, p);
+                        if (por) Portrait.apply(bmp, rotation);
                         byte[] out = encode(bmp, quality);
                         uri = Saver.saveJpeg(app, out, jpeg, rotation, bmp.getWidth(), bmp.getHeight());
                         enhanced = true;
@@ -142,6 +182,8 @@ final class Processor {
     /** {@code params} (denoise, clahe, sharpen, awb, gamma) after the merge; null uses the night preset. */
     static void night(Context ctx, List<byte[]> frames, int rotation, int quality, final float[] params, Done d) {
         final Context app = ctx.getApplicationContext();
+        final float zm = zoom;
+        final boolean por = portrait;
         PENDING.incrementAndGet();
         EXEC.execute(() -> {
             Uri uri = null;
@@ -151,13 +193,14 @@ final class Processor {
             byte[] firstTmp = frames.isEmpty() ? null : frames.get(0);
             try {
                 if (frames.size() > 2) {
+                    dropBlurred(frames);
                     int k = sharpest(frames);
                     if (k > 0) {
                         byte[] t = frames.get(k);
                         frames.set(k, frames.get(0));
                         frames.set(0, t);
-                        firstTmp = t;
                     }
+                    firstTmp = frames.get(0);
                 }
             } catch (Throwable ignored) {
             }
@@ -180,8 +223,9 @@ final class Processor {
                     f.recycle();
                 }
                 Native.mergeEnd(handle, base);
-                float[] p = params != null ? params : Levels.night();
+                float[] p = zoomed(params != null ? params : Levels.night(), zm);
                 enhanceBitmap(app, base, p);
+                if (por) Portrait.apply(base, rotation);
                 byte[] out = encode(base, quality);
                 uri = Saver.saveJpeg(app, out, first, rotation, w, h);
                 enhanced = true;

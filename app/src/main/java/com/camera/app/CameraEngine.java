@@ -140,10 +140,12 @@ final class CameraEngine {
         final String id;
         final float eq;       // 35 mm equivalent focal length
         float factor = 1f;    // zoom factor relative to the main lens (0.6 = ultra wide)
+        float diop;
 
-        Lens(String id, float eq) {
+        Lens(String id, float eq, float diop) {
             this.id = id;
             this.eq = eq;
+            this.diop = diop;
         }
     }
 
@@ -445,6 +447,7 @@ final class CameraEngine {
     // ------------------------------------------------------------------ lenses
 
     private boolean isMainLens() {
+        if (macro != null && macro.id.equals(lensId)) return false;
         return lensId == null || lenses.isEmpty() || Math.abs(currentFactor() - 1f) < 0.05f;
     }
 
@@ -471,6 +474,8 @@ final class CameraEngine {
 
     private void findLenses(CameraSelector base) {
         lenses.clear();
+        macro = null;
+        macroFallback = null;
         if (front) return;
         try {
             for (CameraInfo ci : base.filter(provider.getAvailableCameraInfos())) {
@@ -479,20 +484,53 @@ final class CameraEngine {
                 android.util.SizeF mm = c2.getCameraCharacteristic(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE);
                 if (fl == null || fl.length == 0 || mm == null || mm.getWidth() <= 0) continue;
                 float eq = (float) (fl[0] * 43.2666 / Math.hypot(mm.getWidth(), mm.getHeight()));
-                lenses.add(new Lens(c2.getCameraId(), eq));
+                Float md = c2.getCameraCharacteristic(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE);
+                lenses.add(new Lens(c2.getCameraId(), eq, md == null ? 0f : md));
             }
         } catch (Throwable ignored) {
         }
         if (lenses.isEmpty()) return;
         float ref = lenses.get(0).eq;
         for (Lens l : lenses) l.factor = Math.round(l.eq / ref * 10f) / 10f;
+        macro = null;
+        if (lenses.size() > 1) {
+            float mainD = lenses.get(0).diop;
+            Lens m = null;
+            for (int i = 1; i < lenses.size(); i++) {
+                Lens l = lenses.get(i);
+                if (l.factor >= 0.85f && l.diop >= 20f && l.diop >= mainD * 1.8f && (m == null || l.diop > m.diop)) m = l;
+            }
+            if (m != null) {
+                macro = m;
+                lenses.remove(m);
+            } else {
+                for (int i = 1; i < lenses.size(); i++) {
+                    Lens l = lenses.get(i);
+                    if (l.factor < 0.85f && l.diop >= 20f && l.diop >= mainD * 1.8f && (macroFallback == null || l.diop > macroFallback.diop)) macroFallback = l;
+                }
+            }
+        }
         boolean ok = false;
         for (Lens l : lenses) if (l.id.equals(lensId)) ok = true;
+        if (macro != null && macro.id.equals(lensId)) ok = true;
         if (!ok) lensId = null;
     }
 
+    Lens macro;
+    Lens macroFallback;
+
+    String macroLensId() {
+        if (macro != null) return macro.id;
+        if (macroFallback != null) return macroFallback.id;
+        return null;
+    }
+
+    boolean macroAvailable() {
+        return !front && macroLensId() != null;
+    }
+
     private CameraSelector lensSelector(CameraSelector base) {
-        if (front || lensId == null || lenses.size() < 2) return base;
+        if (front || lensId == null || (lenses.size() < 2 && macro == null)) return base;
         final String id = lensId;
         return new CameraSelector.Builder()
                 .requireLensFacing(CameraSelector.LENS_FACING_BACK)
@@ -604,7 +642,12 @@ final class CameraEngine {
             Range<Integer>[] fps = c2.getCameraCharacteristic(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES);
             if (fps != null) {
                 for (Range<Integer> r : fps) {
-                    if (r.getUpper() >= 24 && (nightFps == null || r.getLower() < nightFps.getLower())) nightFps = r;
+                    if (r.getUpper() >= 24 && r.getLower() >= 12 && (nightFps == null || r.getLower() < nightFps.getLower())) nightFps = r;
+                }
+                if (nightFps == null) {
+                    for (Range<Integer> r : fps) {
+                        if (r.getUpper() >= 24 && (nightFps == null || r.getLower() > nightFps.getLower())) nightFps = r;
+                    }
                 }
             }
         } catch (Throwable ignored) {

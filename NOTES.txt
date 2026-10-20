@@ -28,3 +28,12 @@
 2026-10-19: VIDEO lag: GL effect no longer waits for vsync on every output (swap interval 0), recording surface drawn first, display-priority thread, default live processing now light, and it turns itself off if the measured rate stays under 22 fps
 2026-10-19: VIDEO size: every aspect (9:16, 1:1, full) now goes through one ViewPort so preview and recorded file always share the same crop
 2026-10-19: DEEP: the sharpest of the first 3 frames becomes the merge reference, blurred frames are dropped at 80% of the best sharpness (was 60%)
+
+2026-10-20
+- Video Full: preview spans full column behind top bar, controls stay visible, pills/lens row offset.
+- Video 1:1: square preview centered between top bar and controls.
+- Night: shorter exposure range, blur-frame drop, sharpest reference, shake gating before multi-frame capture.
+- Adaptive tone curve; Deep/HDR quality improvements; JPEG default 100.
+- Added Macro chip (selects dedicated macro lens when exposed by camera list, else ultra wide with close focus) and Portrait chip (face based background blur, Portrait.java).
+- Zoomed shots get extra sharpen and less denoise.
+- 2x digital zoom: stronger sharpen, lighter denoise, at least 3 merged frames when zoom >= 1.5x.

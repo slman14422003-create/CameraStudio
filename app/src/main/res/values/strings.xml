@@ -20,6 +20,8 @@
     <string name="cam_shutter">التقاط</string>
     <string name="cam_switch">تبديل الكاميرا</string>
     <string name="cam_mode_photo">صورة</string>
+    <string name="cam_mode_portrait">بورتريه</string>
+    <string name="cam_mode_macro">ماكرو</string>
     <string name="cam_mode_night">ليلي</string>
     <string name="cam_mode_pro">احترافي</string>
     <string name="cam_perm_title">الكاميرا تحتاج إذنك</string>

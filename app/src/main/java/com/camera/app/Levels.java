@@ -24,7 +24,7 @@ final class Levels {
 
     /** After a multi-frame merge the noise is already low, so mostly tone and detail. */
     static float[] night() {
-        return new float[]{0.55f, 0.35f, 0.55f, 0.30f, 0.85f};
+        return new float[]{0.60f, 0.40f, 0.55f, 0.30f, 1.00f};
     }
 
     /** Deep capture: tens of frames are merged, so the noise is tiny and the detail can be pushed harder. */

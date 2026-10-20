@@ -82,6 +82,8 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
     private TextView status, hdrBtn, timerBtn, infoPill, countView, ratioPill;
     private int vKind;
     private LinearLayout lensRow;
+    private LinearLayout topBar;
+    private LinearLayout colView;
     private final List<TextView> lensBtns = new ArrayList<>();
     private final List<Float> lensStops = new ArrayList<>();
     private LevelView levelView;
@@ -92,6 +94,24 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
     private HorizontalScrollView modeScroll;
     private final Handler liveHand = new Handler(Looper.getMainLooper());
     private boolean hdrRunning;
+    private volatile float shake;
+    private float[] lastAcc;
+    private SensorManager shakeMgr;
+    private final SensorEventListener shakeListener = new SensorEventListener() {
+        @Override
+        public void onSensorChanged(SensorEvent e) {
+            float[] a = e.values;
+            if (lastAcc != null) {
+                float d = Math.abs(a[0] - lastAcc[0]) + Math.abs(a[1] - lastAcc[1]) + Math.abs(a[2] - lastAcc[2]);
+                shake = shake * 0.8f + d * 0.2f;
+            }
+            lastAcc = new float[]{a[0], a[1], a[2]};
+        }
+
+        @Override
+        public void onAccuracyChanged(Sensor sensor, int accuracy) {
+        }
+    };
     private int hdrIdx, hdrPrevEv, hdrRot;
     private int[] hdrSteps;
     private float[] hdrStops;
@@ -122,6 +142,7 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
     private boolean busy, started;
     private LinearLayout bottomBar;
     private final List<Integer> modeIds = new ArrayList<>();
+    private int sub;
     private String nightText = "";
     private Uri lastUri;
     private OrientationEventListener orient;
@@ -205,12 +226,14 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         LinearLayout col = new LinearLayout(this);
         col.setOrientation(LinearLayout.VERTICAL);
         root.addView(col, new FrameLayout.LayoutParams(-1, -1));
+        colView = col;
 
         // ---- top bar
         LinearLayout top = new LinearLayout(this);
         top.setOrientation(LinearLayout.HORIZONTAL);
         top.setGravity(Gravity.CENTER_VERTICAL);
         top.setPadding(dp(8), dp(4), dp(8), dp(4));
+        topBar = top;
         flashBtn = Ios.navIcon(this, R.drawable.ic_flash_off, R.string.cam_flash, v -> cycleFlash());
         top.addView(flashBtn, new LinearLayout.LayoutParams(dp(46), dp(46)));
         hdrBtn = new TextView(this);
@@ -376,8 +399,8 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         LinearLayout modes = new LinearLayout(this);
         modes.setOrientation(LinearLayout.HORIZONTAL);
         modes.setGravity(Gravity.CENTER);
-        final int[] order = {CameraEngine.PHOTO, CameraEngine.HDR, CameraEngine.HIRES, CameraEngine.NIGHT, CameraEngine.DEEP, CameraEngine.PRO, CameraEngine.VIDEO};
-        final int[] names = {R.string.cam_mode_photo, R.string.cam_mode_hdr, R.string.cam_mode_photo, R.string.cam_mode_night,
+        final int[] order = {CameraEngine.PHOTO, 8, 7, CameraEngine.HDR, CameraEngine.HIRES, CameraEngine.NIGHT, CameraEngine.DEEP, CameraEngine.PRO, CameraEngine.VIDEO};
+        final int[] names = {R.string.cam_mode_photo, R.string.cam_mode_portrait, R.string.cam_mode_macro, R.string.cam_mode_hdr, R.string.cam_mode_photo, R.string.cam_mode_night,
                 R.string.cam_mode_deep, R.string.cam_mode_pro, R.string.cam_mode_video};
         for (int i = 0; i < order.length; i++) {
             final int m = order[i];
@@ -742,6 +765,14 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
 
     private void setMode(int m) {
         if (busy || recActive || counting) return;
+        int newSub = m == 7 || m == 8 ? m : 0;
+        if (m == 7 || m == 8) m = CameraEngine.PHOTO;
+        if (sub == 7 && newSub != 7) engine.setLens(null);
+        if (newSub == 7 && engine.macroAvailable()) {
+            engine.setLens(engine.macroLensId());
+            engine.setZoom(1f);
+        }
+        sub = newSub;
         if (m == CameraEngine.VIDEO) presetRatio();
         if (m == CameraEngine.DEEP) engine.setDeepHires(deepWantsHires());
         engine.setMode(m);
@@ -761,7 +792,7 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         else if (vKind == 1) h = w;
         else {
             View par = (View) holder.getParent();
-            h = par.getHeight() > 0 ? par.getHeight() - holder.getTop() : getResources().getDisplayMetrics().heightPixels;
+            h = par.getHeight() > 0 ? par.getHeight() : getResources().getDisplayMetrics().heightPixels;
         }
         return new int[]{w, Math.max(1, h)};
     }
@@ -911,10 +942,13 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
 
     private void refreshModeUi() {
         int m = engine == null ? CameraEngine.PHOTO : engine.mode();
+        if (m != CameraEngine.PHOTO) sub = 0;
+        int hl0 = sub != 0 ? sub : m;
         boolean hiOk = engine != null && engine.hiresAvailable;
         for (int i = 0; i < modeChips.size(); i++) {
             int id = modeIds.get(i);
-            styleMode(modeChips.get(i), id == m);
+            styleMode(modeChips.get(i), id == hl0);
+            if (id == 7) modeChips.get(i).setVisibility(engine != null && engine.macroAvailable() ? View.VISIBLE : View.GONE);
             if (id == CameraEngine.DEEP) {
                 modeChips.get(i).setVisibility(Store.bool(this, "deep_on", false) ? View.VISIBLE : View.GONE);
             }
@@ -926,7 +960,7 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
             }
         }
         for (int i = 0; i < modeChips.size(); i++) {
-            if (modeIds.get(i) == m) {
+            if (modeIds.get(i) == hl0) {
                 final View chip = modeChips.get(i);
                 modeScroll.post(() -> modeScroll.smoothScrollTo(chip.getLeft() - (modeScroll.getWidth() - chip.getWidth()) / 2, 0));
             }
@@ -936,14 +970,35 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         ratioPill.setVisibility(vid ? View.VISIBLE : View.GONE);
         refreshRatioPill();
         LinearLayout.LayoutParams hl = (LinearLayout.LayoutParams) holder.getLayoutParams();
-        boolean overlap = vid && vKind != 1;
-        int wantMargin = overlap ? -dp(130) : 0;
-        if (hl.bottomMargin != wantMargin) {
-            hl.bottomMargin = wantMargin;
+        final boolean full = vid && vKind == 2;
+        final boolean tall = vid && vKind == 0;
+        boolean overlap = full || tall;
+        int topH = topBar != null && topBar.getHeight() > 0 ? topBar.getHeight() : dp(54);
+        int overlapH = full ? dp(250) : tall ? dp(130) : 0;
+        int wantBottom = -overlapH;
+        int wantTop = full ? -topH : 0;
+        if (vid && vKind == 1 && colView != null && colView.getHeight() > 0) {
+            int hw = holder.getWidth() > 0 ? holder.getWidth() : getResources().getDisplayMetrics().widthPixels;
+            int space = colView.getHeight() - topH - dp(250);
+            wantTop = Math.max(0, (space - hw) / 2);
+        }
+        if (hl.bottomMargin != wantBottom || hl.topMargin != wantTop) {
+            hl.bottomMargin = wantBottom;
+            hl.topMargin = wantTop;
             holder.setLayoutParams(hl);
         }
+        if (topBar != null) topBar.setTranslationZ(full ? dp(6) : 0f);
+        int pillTop = full ? topH + dp(10) : dp(10);
+        View[] pills = {status, infoPill, ratioPill};
+        for (View pv : pills) {
+            FrameLayout.LayoutParams pl = (FrameLayout.LayoutParams) pv.getLayoutParams();
+            if (pl.topMargin != pillTop) {
+                pl.topMargin = pillTop;
+                pv.setLayoutParams(pl);
+            }
+        }
         FrameLayout.LayoutParams zl = (FrameLayout.LayoutParams) lensRow.getLayoutParams();
-        int lensMargin = dp(10) + (overlap ? dp(130) : 0);
+        int lensMargin = dp(10) + overlapH;
         if (zl.bottomMargin != lensMargin) {
             zl.bottomMargin = lensMargin;
             lensRow.setLayoutParams(zl);
@@ -1065,6 +1120,11 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         }
         float ratio = Math.max(1f, stop / best.factor);
         boolean sameLens = best.id.equals(engine.lensId()) || (engine.lensId() == null && best == engine.lenses.get(0));
+        if (sub == 7 && !(engine.macroLensId() != null && engine.macroLensId().equals(best.id))) {
+            sub = 0;
+            refreshModeUi();
+            sameLens = false;
+        }
         if (sameLens) {
             engine.setZoom(ratio);
         } else {
@@ -1128,7 +1188,7 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
             cancelCountdown();
             return;
         }
-        Runnable go = engine.mode() == CameraEngine.VIDEO ? this::startVideo : this::shootNow;
+        Runnable go = engine.mode() == CameraEngine.VIDEO ? this::startVideo : () -> steadyThen(this::shootNow);
         int t = Store.num(this, "timer", 0);
         if (t <= 0) {
             go.run();
@@ -1137,6 +1197,28 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         counting = true;
         shutter.setBusy(true);
         tick(t, go);
+    }
+
+    private void steadyThen(final Runnable r) {
+        int m = engine.mode();
+        boolean multi = m == CameraEngine.NIGHT || m == CameraEngine.DEEP || m == CameraEngine.HDR || m == CameraEngine.PHOTO;
+        if (!multi || shake < 0.45f) {
+            r.run();
+            return;
+        }
+        busy = true;
+        shutter.setBusy(true);
+        steadyPoll(r, SystemClock.uptimeMillis());
+    }
+
+    private void steadyPoll(final Runnable r, final long t0) {
+        if (shake < 0.45f || SystemClock.uptimeMillis() - t0 > 900) {
+            busy = false;
+            shutter.setBusy(false);
+            r.run();
+            return;
+        }
+        hand.postDelayed(() -> steadyPoll(r, t0), 60);
     }
 
     private void tick(final int left, final Runnable go) {
@@ -1219,6 +1301,12 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
 
     /** How many frames to merge, from the light the camera measures: bright 1, dim 3, dark 5. */
     private int adaptiveFrames() {
+        int base = adaptiveFramesRaw();
+        if (engine.zoom() * engine.lensFactor() >= 1.5f && base < 3) return 3;
+        return base;
+    }
+
+    private int adaptiveFramesRaw() {
         int iso = engine.liveIso();
         long ns = engine.liveExpNs();
         if (iso <= 0 || ns <= 0) return 3;
@@ -1467,6 +1555,8 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
                     Toast.makeText(CameraActivity.this, R.string.cam_error, Toast.LENGTH_SHORT).show();
                     return;
                 }
+                Processor.zoom = engine.zoom() * engine.lensFactor();
+                Processor.portrait = sub == 8;
                 Processor.shot(CameraActivity.this, b, rot, level, quality(), done);
                 updateStatus();
             }
@@ -1535,6 +1625,8 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         nightText = "";
         busy = false;
         shutter.setBusy(false);
+        Processor.zoom = engine.zoom() * engine.lensFactor();
+        Processor.portrait = sub == 8;
         if (multiShot) {
             multiShot = false;
             Processor.night(this, frames, rot, quality(), Levels.params(level), done);
@@ -1749,6 +1841,12 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         liveHand.removeCallbacks(liveInfo);
         liveHand.postDelayed(liveInfo, 700);
         if (levelView != null) levelView.start();
+        try {
+            shakeMgr = (SensorManager) getSystemService(SENSOR_SERVICE);
+            Sensor acc = shakeMgr == null ? null : shakeMgr.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
+            if (acc != null) shakeMgr.registerListener(shakeListener, acc, SensorManager.SENSOR_DELAY_GAME);
+        } catch (Throwable ignored) {
+        }
         if (engine.mode() == CameraEngine.DEEP) {
             if (!Store.bool(this, "deep_on", false)) engine.setMode(CameraEngine.PHOTO);
             else engine.setDeepHires(deepWantsHires());
@@ -1764,6 +1862,10 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
     @Override
     protected void onPause() {
         if (levelView != null) levelView.stop();
+        try {
+            if (shakeMgr != null) shakeMgr.unregisterListener(shakeListener);
+        } catch (Throwable ignored) {
+        }
         liveHand.removeCallbacks(liveInfo);
         if (hdrRunning) abortHdr();
         if (deepRunning) {
@@ -1873,8 +1975,11 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
             if (video) {
                 int avail = MeasureSpec.getSize(h);
                 height = kind == 1 ? width : width * 16 / 9;
-                if (kind == 2 && avail > 0) height = avail;
-                else if (avail > 0) height = Math.min(height, avail);
+                View pv = (View) getParent();
+                int ph = pv == null ? 0 : pv.getHeight();
+                if (kind == 2 && ph > 0) height = ph;
+                else if (kind == 2 && avail > 0) height = avail;
+                else if (avail > 0 && kind != 1) height = Math.min(height, avail);
             }
             super.onMeasure(MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY),
                     MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY));

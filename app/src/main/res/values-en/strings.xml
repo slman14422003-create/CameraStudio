@@ -20,6 +20,8 @@
     <string name="cam_shutter">Capture</string>
     <string name="cam_switch">Switch camera</string>
     <string name="cam_mode_photo">Photo</string>
+    <string name="cam_mode_portrait">Portrait</string>
+    <string name="cam_mode_macro">Macro</string>
     <string name="cam_mode_night">Night</string>
     <string name="cam_mode_pro">Pro</string>
     <string name="cam_perm_title">The camera needs your permission</string>
