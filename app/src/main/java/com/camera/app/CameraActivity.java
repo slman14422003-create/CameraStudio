@@ -232,10 +232,10 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         LinearLayout top = new LinearLayout(this);
         top.setOrientation(LinearLayout.HORIZONTAL);
         top.setGravity(Gravity.CENTER_VERTICAL);
-        top.setPadding(dp(8), dp(4), dp(8), dp(4));
+        top.setPadding(dp(14), dp(8), dp(14), dp(8));
         topBar = top;
-        flashBtn = Ios.navIcon(this, R.drawable.ic_flash_off, R.string.cam_flash, v -> cycleFlash());
-        top.addView(flashBtn, new LinearLayout.LayoutParams(dp(46), dp(46)));
+        flashBtn = glassIcon(R.drawable.ic_flash_off, R.string.cam_flash, v -> cycleFlash());
+        top.addView(flashBtn, new LinearLayout.LayoutParams(dp(42), dp(42)));
         hdrBtn = new TextView(this);
         hdrBtn.setText("HDR");
         hdrBtn.setTextSize(13);
@@ -259,13 +259,13 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         tmp.setMarginStart(dp(6));
         top.addView(timerBtn, tmp);
         top.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1f));
-        gridBtn = Ios.navIcon(this, R.drawable.ic_grid, R.string.cam_grid, v -> {
+        gridBtn = glassIcon(R.drawable.ic_grid, R.string.cam_grid, v -> {
             Store.setBool(this, "grid", !Store.bool(this, "grid", true));
             refreshTop();
         });
-        top.addView(gridBtn, new LinearLayout.LayoutParams(dp(46), dp(46)));
-        top.addView(Ios.navIcon(this, R.drawable.ic_settings, R.string.settings,
-                v -> startActivity(new Intent(this, SettingsActivity.class))), new LinearLayout.LayoutParams(dp(46), dp(46)));
+        top.addView(gridBtn, new LinearLayout.LayoutParams(dp(42), dp(42)));
+        top.addView(glassIcon(R.drawable.ic_settings, R.string.settings,
+                v -> startActivity(new Intent(this, SettingsActivity.class))), new LinearLayout.LayoutParams(dp(42), dp(42)));
         col.addView(top, new LinearLayout.LayoutParams(-1, -2));
 
         // ---- preview (3:4)
@@ -438,12 +438,12 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         thumb = new ImageView(this);
         thumb.setScaleType(ImageView.ScaleType.CENTER_CROP);
         GradientDrawable tb = new GradientDrawable();
-        tb.setCornerRadius(dp(12));
-        tb.setColor(Ui.color(this, R.color.neutral_soft));
+        tb.setShape(GradientDrawable.OVAL);
+        tb.setColor(0x33FFFFFF);
         thumb.setBackground(tb);
         thumb.setClipToOutline(true);
         thumb.setImageResource(R.drawable.ic_image);
-        thumb.setImageTintList(android.content.res.ColorStateList.valueOf(Ui.color(this, R.color.text_secondary)));
+        thumb.setImageTintList(android.content.res.ColorStateList.valueOf(0xCCFFFFFF));
         thumb.setPadding(dp(12), dp(12), dp(12), dp(12));
         thumb.setContentDescription(getString(R.string.cam_open_gallery));
         thumb.setOnClickListener(v -> openLast());
@@ -457,14 +457,15 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
             v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
             shoot();
         });
-        shutterRow.addView(shutter, new LinearLayout.LayoutParams(dp(78), dp(78)));
+        shutterRow.addView(shutter, new LinearLayout.LayoutParams(dp(82), dp(82)));
         shutterRow.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1f));
 
         switchBtn = Ios.navIcon(this, R.drawable.ic_refresh, R.string.cam_switch, v -> switchCamera());
         GradientDrawable sb = new GradientDrawable();
         sb.setShape(GradientDrawable.OVAL);
-        sb.setColor(Ui.color(this, R.color.neutral_soft));
+        sb.setColor(0x33FFFFFF);
         switchBtn.setBackground(sb);
+        switchBtn.setImageTintList(android.content.res.ColorStateList.valueOf(Color.WHITE));
         shutterRow.addView(switchBtn, new LinearLayout.LayoutParams(dp(52), dp(52)));
         LinearLayout.LayoutParams srp = new LinearLayout.LayoutParams(-1, -2);
         srp.topMargin = dp(14);
@@ -478,6 +479,16 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         refreshModeUi();
     }
 
+    private ImageButton glassIcon(int icon, int desc, View.OnClickListener click) {
+        ImageButton b = Ios.navIcon(this, icon, desc, click);
+        b.setImageTintList(android.content.res.ColorStateList.valueOf(Color.WHITE));
+        GradientDrawable g = new GradientDrawable();
+        g.setShape(GradientDrawable.OVAL);
+        g.setColor(0x55000000);
+        b.setBackground(g);
+        return b;
+    }
+
     private TextView pill() {
         TextView t = new TextView(this);
         t.setTextColor(Color.WHITE);
@@ -487,7 +498,7 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         t.setPadding(dp(14), dp(6), dp(14), dp(6));
         GradientDrawable g = new GradientDrawable();
         g.setCornerRadius(dp(100));
-        g.setColor(0x99000000);
+        g.setColor(0x66000000);
         t.setBackground(g);
         return t;
     }
@@ -828,7 +839,11 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
     }
 
     private void styleMode(TextView t, boolean sel) {
-        t.setTextColor(sel ? Ios.YELLOW : 0xB3FFFFFF);
+        GradientDrawable g = new GradientDrawable();
+        g.setCornerRadius(dp(100));
+        g.setColor(sel ? 0x40FFFFFF : 0x00000000);
+        t.setBackground(g);
+        t.setTextColor(sel ? Ios.YELLOW : 0xCCFFFFFF);
     }
 
     /** The lens buttons (0.7 / 1 / 2 / 4 …) under the preview, iOS style: the active one is yellow and shows the exact zoom. */
@@ -1039,21 +1054,21 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         timerBtn.setText(tsec == 0 ? "⏱" : "⏱ " + tsec + "s");
         GradientDrawable tg = new GradientDrawable();
         tg.setCornerRadius(dp(100));
-        tg.setColor(tsec > 0 ? Ui.color(this, R.color.accent) : Ui.color(this, R.color.neutral_soft));
+        tg.setColor(tsec > 0 ? Ios.YELLOW : 0x55000000);
         timerBtn.setBackground(tg);
-        timerBtn.setTextColor(Color.WHITE);
+        timerBtn.setTextColor(tsec > 0 ? Color.BLACK : Color.WHITE);
         boolean hdrOk = engine != null && engine.hdrAvailable && photo && !engine.isFront();
         hdrBtn.setVisibility(hdrOk ? View.VISIBLE : View.GONE);
         boolean hdrOn = Store.bool(this, "hdr", false);
         GradientDrawable g = new GradientDrawable();
         g.setCornerRadius(dp(100));
-        g.setColor(hdrOn ? Ui.color(this, R.color.accent) : Ui.color(this, R.color.neutral_soft));
+        g.setColor(hdrOn ? Ios.YELLOW : 0x55000000);
         hdrBtn.setBackground(g);
-        hdrBtn.setTextColor(Color.WHITE);
+        hdrBtn.setTextColor(hdrOn ? Color.BLACK : Color.WHITE);
         boolean gridOn = Store.bool(this, "grid", true);
         grid.setVisibility(gridOn ? View.VISIBLE : View.GONE);
         gridBtn.setImageTintList(android.content.res.ColorStateList.valueOf(
-                Ui.color(this, gridOn ? R.color.accent : R.color.text_primary)));
+                gridOn ? Ios.YELLOW : Color.WHITE));
     }
 
     private void cycleFlash() {
@@ -2081,7 +2096,7 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         ShutterView(android.content.Context c) {
             super(c);
             ring.setStyle(Paint.Style.STROKE);
-            ring.setStrokeWidth(Ui.dpf(c, 4f));
+            ring.setStrokeWidth(Ui.dpf(c, 3.5f));
             disc.setStyle(Paint.Style.FILL);
             Ui.press(c, this);
         }
@@ -2121,22 +2136,22 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
             c.drawCircle(cx, cy, r - ring.getStrokeWidth() / 2f, ring);
             if (rec && !video) {   // deep capture running: a square means "tap to finish"
                 disc.setColor(night ? accent : Color.WHITE);
-                float hs = (r - Ui.dpf(getContext(), 9f)) * 0.5f;
+                float hs = (r - Ui.dpf(getContext(), 8f)) * 0.5f;
                 c.drawRoundRect(cx - hs, cy - hs, cx + hs, cy + hs, hs * 0.3f, hs * 0.3f, disc);
                 return;
             }
             if (video) {
                 disc.setColor(0xFFFF3B30);
                 if (rec) {
-                    float h = (r - Ui.dpf(getContext(), 9f)) * 0.55f;
+                    float h = (r - Ui.dpf(getContext(), 8f)) * 0.55f;
                     c.drawRoundRect(cx - h, cy - h, cx + h, cy + h, h * 0.3f, h * 0.3f, disc);
                 } else {
-                    c.drawCircle(cx, cy, (r - Ui.dpf(getContext(), 9f)) * scale, disc);
+                    c.drawCircle(cx, cy, (r - Ui.dpf(getContext(), 8f)) * scale, disc);
                 }
                 return;
             }
             disc.setColor(busy ? (night ? accent : 0xFFD1D1D6) : Color.WHITE);
-            c.drawCircle(cx, cy, (r - Ui.dpf(getContext(), 9f)) * scale, disc);
+            c.drawCircle(cx, cy, (r - Ui.dpf(getContext(), 8f)) * scale, disc);
         }
     }
 

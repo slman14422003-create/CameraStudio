@@ -712,7 +712,7 @@ final class CameraEngine {
                     bind();
                     return;
                 }
-                int bitrate = videoQuality == Quality.UHD ? 40_000_000 : videoQuality == Quality.FHD ? 16_000_000
+                int bitrate = videoQuality == Quality.UHD ? 30_000_000 : videoQuality == Quality.FHD ? 12_000_000
                         : videoQuality == Quality.HD ? 9_000_000 : 4_000_000;
                 recorder = new Recorder.Builder().setQualitySelector(QualitySelector.from(videoQuality))
                         .setTargetVideoEncodingBitRate(bitrate).build();
@@ -725,8 +725,8 @@ final class CameraEngine {
                     videoSize = QualitySelector.getResolution(infos.get(0), videoQuality);
                 } catch (Throwable ignored) {
                 }
-                float fxStrength = Store.num(act, "vfx", 1) == 1 ? 0.35f : Store.num(act, "vfx", 1) == 3 ? 0.9f : 0.6f;
-                if (Store.num(act, "vfx", 1) > 0 && Build.VERSION.SDK_INT >= 23) {
+                float fxStrength = Store.num(act, "vfx", 0) == 1 ? 0.35f : Store.num(act, "vfx", 0) == 3 ? 0.9f : 0.6f;
+                if (Store.num(act, "vfx", 0) > 0 && Build.VERSION.SDK_INT >= 23) {
                     try {
                         fx = new VideoFx(fxStrength);
                         fxGen++;

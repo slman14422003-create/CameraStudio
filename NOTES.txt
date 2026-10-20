@@ -37,3 +37,4 @@
 - Added Macro chip (selects dedicated macro lens when exposed by camera list, else ultra wide with close focus) and Portrait chip (face based background blur, Portrait.java).
 - Zoomed shots get extra sharpen and less denoise.
 - 2x digital zoom: stronger sharpen, lighter denoise, at least 3 merged frames when zoom >= 1.5x.
+- Video: live effect default off, lower bitrates. 50MP: stronger denoise. iOS-style glass UI restyle and new camera launcher icon.

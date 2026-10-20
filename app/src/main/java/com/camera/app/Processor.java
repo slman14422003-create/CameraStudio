@@ -151,6 +151,11 @@ final class Processor {
             boolean enhanced = false;
             try {
                 float[] p = Native.LOADED ? zoomed(Levels.params(level), zm) : null;
+                if (p != null && pixels(jpeg) > 30_000_000L) {
+                    p = p.clone();
+                    p[0] = Math.min(1f, p[0] + 0.22f);
+                    p[2] = Math.max(0f, p[2] - 0.10f);
+                }
                 if (p == null || pixels(jpeg) > limit(app)) {
                     uri = Saver.saveJpeg(app, jpeg, jpeg, rotation, 0, 0);
                 } else {
