@@ -39,3 +39,5 @@
 - 2x digital zoom: stronger sharpen, lighter denoise, at least 3 merged frames when zoom >= 1.5x.
 - Video: live effect default off, lower bitrates. 50MP: stronger denoise. iOS-style glass UI restyle and new camera launcher icon.
 - Floating glass capsules for top bar and mode strip, glass level chips, blue camera launcher icon (smaller glyph).
+- iPhone Camera look: plain top icons, text-only mode row, dark round buttons, silver launcher icon with black camera.
+- Layout: top bar = flash / chevron / settings; chevron opens options panel (HDR, timer, grid, processing level).

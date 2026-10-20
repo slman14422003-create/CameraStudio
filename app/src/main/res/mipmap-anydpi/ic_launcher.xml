@@ -3,7 +3,7 @@
     <item>
         <shape android:shape="rectangle">
             <corners android:radius="18dp" />
-            <gradient android:angle="315" android:startColor="#4DB0FF" android:endColor="#0A5BE0" />
+            <gradient android:angle="270" android:startColor="#E5E5EA" android:endColor="#8E8E93" />
         </shape>
     </item>
     <item android:drawable="@drawable/ic_launcher_foreground" />

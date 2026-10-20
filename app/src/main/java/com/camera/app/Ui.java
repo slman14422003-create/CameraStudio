@@ -188,9 +188,9 @@ public final class Ui {
     public static void setChip(Context c, TextView t, boolean selected) {
         GradientDrawable g = new GradientDrawable();
         g.setCornerRadius(dp(c, 100));
-        g.setColor(selected ? 0xFFFFFFFF : 0x4D3A3A3C);
+        g.setColor(selected ? 0xFF2C2C2E : 0xFF1C1C1E);
         t.setBackground(g);
-        t.setTextColor(selected ? 0xFF000000 : 0xFFFFFFFF);
+        t.setTextColor(selected ? 0xFFFFD60A : 0xFFFFFFFF);
     }
 
     public static TextView sectionTitle(Context c, CharSequence text) {
