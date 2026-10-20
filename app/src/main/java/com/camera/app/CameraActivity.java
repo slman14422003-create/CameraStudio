@@ -235,7 +235,9 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         top.setPadding(dp(14), dp(8), dp(14), dp(8));
         topBar = top;
         flashBtn = glassIcon(R.drawable.ic_flash_off, R.string.cam_flash, v -> cycleFlash());
-        top.addView(flashBtn, new LinearLayout.LayoutParams(dp(42), dp(42)));
+        LinearLayout leftCap = capsule();
+        top.addView(leftCap, new LinearLayout.LayoutParams(-2, -2));
+        leftCap.addView(flashBtn, new LinearLayout.LayoutParams(dp(40), dp(40)));
         hdrBtn = new TextView(this);
         hdrBtn.setText("HDR");
         hdrBtn.setTextSize(13);
@@ -245,8 +247,8 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         hdrBtn.setOnClickListener(v -> toggleHdr());
         Ui.press(this, hdrBtn);
         LinearLayout.LayoutParams hp = new LinearLayout.LayoutParams(-2, -2);
-        hp.setMarginStart(dp(6));
-        top.addView(hdrBtn, hp);
+        hp.setMarginStart(dp(2));
+        leftCap.addView(hdrBtn, hp);
         timerBtn = new TextView(this);
         timerBtn.setTextSize(13);
         timerBtn.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
@@ -256,16 +258,18 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         timerBtn.setOnClickListener(v -> cycleTimer());
         Ui.press(this, timerBtn);
         LinearLayout.LayoutParams tmp = new LinearLayout.LayoutParams(-2, -2);
-        tmp.setMarginStart(dp(6));
-        top.addView(timerBtn, tmp);
+        tmp.setMarginStart(dp(2));
+        leftCap.addView(timerBtn, tmp);
         top.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1f));
+        LinearLayout rightCap = capsule();
+        top.addView(rightCap, new LinearLayout.LayoutParams(-2, -2));
         gridBtn = glassIcon(R.drawable.ic_grid, R.string.cam_grid, v -> {
             Store.setBool(this, "grid", !Store.bool(this, "grid", true));
             refreshTop();
         });
-        top.addView(gridBtn, new LinearLayout.LayoutParams(dp(42), dp(42)));
-        top.addView(glassIcon(R.drawable.ic_settings, R.string.settings,
-                v -> startActivity(new Intent(this, SettingsActivity.class))), new LinearLayout.LayoutParams(dp(42), dp(42)));
+        rightCap.addView(gridBtn, new LinearLayout.LayoutParams(dp(40), dp(40)));
+        rightCap.addView(glassIcon(R.drawable.ic_settings, R.string.settings,
+                v -> startActivity(new Intent(this, SettingsActivity.class))), new LinearLayout.LayoutParams(dp(40), dp(40)));
         col.addView(top, new LinearLayout.LayoutParams(-1, -2));
 
         // ---- preview (3:4)
@@ -406,10 +410,10 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
             final int m = order[i];
             TextView t = new TextView(this);
             t.setText(m == CameraEngine.HIRES ? "50 MP" : getString(names[i]).toUpperCase(Locale.getDefault()));
-            t.setTextSize(13.5f);
-            t.setLetterSpacing(0.05f);
+            t.setTextSize(12.5f);
+            t.setLetterSpacing(0.06f);
             t.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
-            t.setPadding(dp(14), dp(8), dp(14), dp(8));
+            t.setPadding(dp(12), dp(7), dp(12), dp(7));
             t.setOnClickListener(v -> {
                 v.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
                 setMode(m);
@@ -426,8 +430,18 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         modeScroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
         modeScroll.setFillViewport(true);
         modeScroll.addView(modes, new FrameLayout.LayoutParams(-1, -2));
-        LinearLayout.LayoutParams mp = new LinearLayout.LayoutParams(-1, -2);
-        mp.topMargin = dp(6);
+        GradientDrawable mg = new GradientDrawable();
+        mg.setCornerRadius(dp(100));
+        mg.setColor(0x66000000);
+        mg.setStroke(Ios.hairPx(this), 0x26FFFFFF);
+        modeScroll.setBackground(mg);
+        modeScroll.setPadding(dp(6), dp(3), dp(6), dp(3));
+        modeScroll.setClipToPadding(false);
+        modeScroll.setFillViewport(false);
+        LinearLayout.LayoutParams mp = new LinearLayout.LayoutParams(-2, -2);
+        mp.topMargin = dp(8);
+        mp.setMarginStart(dp(14));
+        mp.setMarginEnd(dp(14));
         bottom.addView(modeScroll, mp);
 
         LinearLayout shutterRow = new LinearLayout(this);
@@ -482,11 +496,21 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
     private ImageButton glassIcon(int icon, int desc, View.OnClickListener click) {
         ImageButton b = Ios.navIcon(this, icon, desc, click);
         b.setImageTintList(android.content.res.ColorStateList.valueOf(Color.WHITE));
-        GradientDrawable g = new GradientDrawable();
-        g.setShape(GradientDrawable.OVAL);
-        g.setColor(0x55000000);
-        b.setBackground(g);
+        b.setBackgroundResource(R.drawable.bg_tile_round);
         return b;
+    }
+
+    private LinearLayout capsule() {
+        LinearLayout l = new LinearLayout(this);
+        l.setOrientation(LinearLayout.HORIZONTAL);
+        l.setGravity(Gravity.CENTER_VERTICAL);
+        l.setPadding(dp(6), dp(2), dp(6), dp(2));
+        GradientDrawable g = new GradientDrawable();
+        g.setCornerRadius(dp(100));
+        g.setColor(0x73000000);
+        g.setStroke(Ios.hairPx(this), 0x33FFFFFF);
+        l.setBackground(g);
+        return l;
     }
 
     private TextView pill() {
@@ -1054,7 +1078,7 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         timerBtn.setText(tsec == 0 ? "⏱" : "⏱ " + tsec + "s");
         GradientDrawable tg = new GradientDrawable();
         tg.setCornerRadius(dp(100));
-        tg.setColor(tsec > 0 ? Ios.YELLOW : 0x55000000);
+        tg.setColor(tsec > 0 ? Ios.YELLOW : 0x00000000);
         timerBtn.setBackground(tg);
         timerBtn.setTextColor(tsec > 0 ? Color.BLACK : Color.WHITE);
         boolean hdrOk = engine != null && engine.hdrAvailable && photo && !engine.isFront();
@@ -1062,7 +1086,7 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         boolean hdrOn = Store.bool(this, "hdr", false);
         GradientDrawable g = new GradientDrawable();
         g.setCornerRadius(dp(100));
-        g.setColor(hdrOn ? Ios.YELLOW : 0x55000000);
+        g.setColor(hdrOn ? Ios.YELLOW : 0x00000000);
         hdrBtn.setBackground(g);
         hdrBtn.setTextColor(hdrOn ? Color.BLACK : Color.WHITE);
         boolean gridOn = Store.bool(this, "grid", true);

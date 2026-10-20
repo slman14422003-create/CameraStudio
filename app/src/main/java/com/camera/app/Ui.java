@@ -170,11 +170,11 @@ public final class Ui {
     public static TextView chip(Context c, CharSequence text, boolean selected) {
         TextView t = new TextView(c);
         t.setText(text);
-        t.setTextSize(14);
+        t.setTextSize(13);
         t.setSingleLine(true);
         t.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
-        int ph = dp(c, 16);
-        int pv = dp(c, 8);
+        int ph = dp(c, 14);
+        int pv = dp(c, 6);
         t.setPadding(ph, pv, ph, pv);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -188,9 +188,9 @@ public final class Ui {
     public static void setChip(Context c, TextView t, boolean selected) {
         GradientDrawable g = new GradientDrawable();
         g.setCornerRadius(dp(c, 100));
-        g.setColor(color(c, selected ? R.color.accent : R.color.neutral_soft));
+        g.setColor(selected ? 0xFFFFFFFF : 0x4D3A3A3C);
         t.setBackground(g);
-        t.setTextColor(color(c, selected ? R.color.on_accent : R.color.text_primary));
+        t.setTextColor(selected ? 0xFF000000 : 0xFFFFFFFF);
     }
 
     public static TextView sectionTitle(Context c, CharSequence text) {
