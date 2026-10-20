@@ -141,7 +141,7 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
     private int flashState;          // 0 off, 1 auto, 2 on
     private int rotation = Surface.ROTATION_0;
     private boolean busy, started;
-    private LinearLayout bottomBar;
+    private LinearLayout bottomBar, pod;
     private final List<Integer> modeIds = new ArrayList<>();
     private int sub;
     private String nightText = "";
@@ -235,13 +235,13 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         top.setGravity(Gravity.CENTER_VERTICAL);
         top.setPadding(dp(12), dp(6), dp(12), dp(6));
         topBar = top;
-        flashBtn = glassIcon(R.drawable.ic_flash_off, R.string.cam_flash, v -> cycleFlash());
+        flashBtn = glassIcon(R.drawable.ic_c_flash_off, R.string.cam_flash, v -> cycleFlash());
         top.addView(flashBtn, new LinearLayout.LayoutParams(dp(44), dp(44)));
         top.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1f));
-        chevron = glassIcon(R.drawable.ic_arrow_down, R.string.cam_info, v -> toggleOptions());
+        chevron = glassIcon(R.drawable.ic_c_chev, R.string.cam_info, v -> toggleOptions());
         top.addView(chevron, new LinearLayout.LayoutParams(dp(56), dp(44)));
         top.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1f));
-        top.addView(glassIcon(R.drawable.ic_settings, R.string.settings,
+        top.addView(glassIcon(R.drawable.ic_c_gear, R.string.settings,
                 v -> startActivity(new Intent(this, SettingsActivity.class))), new LinearLayout.LayoutParams(dp(44), dp(44)));
         col.addView(top, new LinearLayout.LayoutParams(-1, -2));
 
@@ -280,7 +280,7 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         LinearLayout.LayoutParams tmp = new LinearLayout.LayoutParams(-2, -2);
         tmp.setMarginEnd(dp(10));
         optRow.addView(timerBtn, tmp);
-        gridBtn = glassIcon(R.drawable.ic_grid, R.string.cam_grid, v -> {
+        gridBtn = glassIcon(R.drawable.ic_c_grid, R.string.cam_grid, v -> {
             Store.setBool(this, "grid", !Store.bool(this, "grid", true));
             refreshTop();
         });
@@ -425,16 +425,19 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         modes.setOrientation(LinearLayout.HORIZONTAL);
         modes.setGravity(Gravity.CENTER);
         final int[] order = {CameraEngine.PHOTO, 8, 7, CameraEngine.HDR, CameraEngine.HIRES, CameraEngine.NIGHT, CameraEngine.DEEP, CameraEngine.PRO, CameraEngine.VIDEO};
+        final int[] icons = {R.drawable.ic_m_photo, R.drawable.ic_m_portrait, R.drawable.ic_m_macro, R.drawable.ic_m_hdr, R.drawable.ic_m_hires, R.drawable.ic_m_night, R.drawable.ic_m_deep, R.drawable.ic_m_pro, R.drawable.ic_m_video};
         final int[] names = {R.string.cam_mode_photo, R.string.cam_mode_portrait, R.string.cam_mode_macro, R.string.cam_mode_hdr, R.string.cam_mode_photo, R.string.cam_mode_night,
                 R.string.cam_mode_deep, R.string.cam_mode_pro, R.string.cam_mode_video};
         for (int i = 0; i < order.length; i++) {
             final int m = order[i];
             TextView t = new TextView(this);
-            t.setText(m == CameraEngine.HIRES ? "50 MP" : getString(names[i]).toUpperCase(Locale.getDefault()));
+            t.setContentDescription(m == CameraEngine.HIRES ? "50 MP" : getString(names[i]).toUpperCase(Locale.getDefault()));
+            t.setTag(icons[i]);
+            t.setGravity(Gravity.CENTER);
             t.setTextSize(13.5f);
             t.setLetterSpacing(0.08f);
             t.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
-            t.setPadding(dp(12), dp(7), dp(12), dp(7));
+            t.setPadding(dp(13), dp(9), dp(13), dp(9));
             t.setOnClickListener(v -> {
                 v.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
                 setMode(m);
@@ -451,21 +454,29 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         modeScroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
         modeScroll.setFillViewport(true);
         modeScroll.addView(modes, new FrameLayout.LayoutParams(-1, -2));
+        modeScroll.setPadding(dp(8), dp(6), dp(8), dp(2));
+        modeScroll.setClipToPadding(false);
         modeScroll.setFillViewport(true);
-        LinearLayout.LayoutParams mp = new LinearLayout.LayoutParams(-1, -2);
-        mp.topMargin = dp(6);
-        bottom.addView(modeScroll, mp);
+        pod = new LinearLayout(this);
+        pod.setOrientation(LinearLayout.VERTICAL);
+        GradientDrawable pg = new GradientDrawable();
+        pg.setCornerRadius(dp(40));
+        pg.setColor(0xB31C1C1E);
+        pg.setStroke(Ios.hairPx(this), 0x22FFFFFF);
+        pod.setBackground(pg);
+        pod.setPadding(0, dp(4), 0, dp(14));
+        pod.addView(modeScroll, new LinearLayout.LayoutParams(-1, -2));
 
         LinearLayout shutterRow = new LinearLayout(this);
         shutterRow.setOrientation(LinearLayout.HORIZONTAL);
         shutterRow.setGravity(Gravity.CENTER_VERTICAL);
-        shutterRow.setPadding(dp(30), 0, dp(30), 0);
+        shutterRow.setPadding(dp(22), 0, dp(22), 0);
 
         thumb = new ImageView(this);
         thumb.setScaleType(ImageView.ScaleType.CENTER_CROP);
         GradientDrawable tb = new GradientDrawable();
         tb.setCornerRadius(dp(10));
-        tb.setColor(0xFF1C1C1E);
+        tb.setColor(0x33FFFFFF);
         thumb.setBackground(tb);
         thumb.setClipToOutline(true);
         thumb.setImageResource(R.drawable.ic_image);
@@ -486,16 +497,19 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         shutterRow.addView(shutter, new LinearLayout.LayoutParams(dp(82), dp(82)));
         shutterRow.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1f));
 
-        switchBtn = Ios.navIcon(this, R.drawable.ic_refresh, R.string.cam_switch, v -> switchCamera());
+        switchBtn = Ios.navIcon(this, R.drawable.ic_c_flip, R.string.cam_switch, v -> switchCamera());
         GradientDrawable sb = new GradientDrawable();
         sb.setShape(GradientDrawable.OVAL);
-        sb.setColor(0xFF1C1C1E);
+        sb.setColor(0x33FFFFFF);
         switchBtn.setBackground(sb);
         switchBtn.setImageTintList(android.content.res.ColorStateList.valueOf(Color.WHITE));
         shutterRow.addView(switchBtn, new LinearLayout.LayoutParams(dp(52), dp(52)));
         LinearLayout.LayoutParams srp = new LinearLayout.LayoutParams(-1, -2);
-        srp.topMargin = dp(14);
-        bottom.addView(shutterRow, srp);
+        srp.topMargin = dp(8);
+        pod.addView(shutterRow, srp);
+        LinearLayout.LayoutParams podp = new LinearLayout.LayoutParams(-1, -2);
+        podp.setMargins(dp(12), dp(6), dp(12), dp(12));
+        bottom.addView(pod, podp);
 
         FrameLayout.LayoutParams opl = new FrameLayout.LayoutParams(-1, -2, Gravity.TOP);
         opl.setMargins(dp(10), 0, dp(10), 0);
@@ -512,7 +526,10 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
     private ImageButton glassIcon(int icon, int desc, View.OnClickListener click) {
         ImageButton b = Ios.navIcon(this, icon, desc, click);
         b.setImageTintList(android.content.res.ColorStateList.valueOf(Color.WHITE));
-        b.setBackgroundResource(R.drawable.bg_tile_round);
+        GradientDrawable gb = new GradientDrawable();
+        gb.setCornerRadius(dp(22));
+        gb.setColor(0xCC2C2C2E);
+        b.setBackground(gb);
         return b;
     }
 
@@ -880,9 +897,22 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
     private void styleMode(TextView t, boolean sel) {
         GradientDrawable g = new GradientDrawable();
         g.setCornerRadius(dp(100));
-        g.setColor(0x00000000);
+        g.setColor(sel ? 0x40FFFFFF : 0x00000000);
         t.setBackground(g);
-        t.setTextColor(sel ? Ios.YELLOW : 0xCCFFFFFF);
+        int col = sel ? Ios.YELLOW : 0xCCFFFFFF;
+        t.setTextColor(col);
+        CharSequence label = t.getContentDescription();
+        t.setText(sel && label != null ? label : "");
+        t.setTextSize(12.5f);
+        t.setLetterSpacing(0.06f);
+        Object ic = t.getTag();
+        if (ic instanceof Integer) {
+            android.graphics.drawable.Drawable d = getDrawable((Integer) ic).mutate();
+            d.setTint(col);
+            d.setBounds(0, 0, dp(22), dp(22));
+            t.setCompoundDrawablesRelative(d, null, null, null);
+            t.setCompoundDrawablePadding(sel ? dp(6) : 0);
+        }
     }
 
     /** The lens buttons (0.7 / 1 / 2 / 4 …) under the preview, iOS style: the active one is yellow and shows the exact zoom. */
@@ -1009,10 +1039,11 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
             if (id == CameraEngine.HIRES) {
                 modeChips.get(i).setVisibility(hiOk ? View.VISIBLE : View.GONE);
                 if (hiOk && engine.maxSize != null) {
-                    modeChips.get(i).setText(CamInfo.mpText(engine.maxSize.getWidth(), engine.maxSize.getHeight()));
+                    modeChips.get(i).setContentDescription(CamInfo.mpText(engine.maxSize.getWidth(), engine.maxSize.getHeight()));
                 }
             }
         }
+        for (int i = 0; i < modeChips.size(); i++) styleMode(modeChips.get(i), modeIds.get(i) == hl0);
         for (int i = 0; i < modeChips.size(); i++) {
             if (modeIds.get(i) == hl0) {
                 final View chip = modeChips.get(i);
@@ -1057,13 +1088,7 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
             zl.bottomMargin = lensMargin;
             lensRow.setLayoutParams(zl);
         }
-        if (overlap) {
-            GradientDrawable scrim = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                    new int[]{0x00000000, 0xB3000000, 0xF2000000});
-            bottomBar.setBackground(scrim);
-        } else {
-            bottomBar.setBackground(null);
-        }
+        bottomBar.setBackground(null);
         levelRow.setVisibility(vid ? View.GONE : (m == CameraEngine.NIGHT || m == CameraEngine.DEEP || m == CameraEngine.HDR) ? View.INVISIBLE : View.VISIBLE);
         videoRow.setVisibility(vid ? View.VISIBLE : View.GONE);
         if (vid && engine != null) rebuildVideoRow();
@@ -1086,7 +1111,7 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         boolean video = engine != null && engine.mode() == CameraEngine.VIDEO;
         boolean canFlash = engine != null && engine.hasFlash && !engine.isFront() && (photo || video);
         flashBtn.setVisibility(canFlash ? View.VISIBLE : View.INVISIBLE);
-        int[] icons = {R.drawable.ic_flash_off, R.drawable.ic_flash_auto, R.drawable.ic_flash};
+        int[] icons = {R.drawable.ic_c_flash_off, R.drawable.ic_c_flash_auto, R.drawable.ic_c_flash};
         flashBtn.setImageResource(video ? (engine.torchOn() ? icons[2] : icons[0]) : icons[flashState]);
         if (levelView != null) levelView.setEnabledLine(Store.bool(this, "level_line", true));
         int tsec = Store.num(this, "timer", 0);

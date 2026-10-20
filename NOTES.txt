@@ -41,3 +41,4 @@
 - Floating glass capsules for top bar and mode strip, glass level chips, blue camera launcher icon (smaller glyph).
 - iPhone Camera look: plain top icons, text-only mode row, dark round buttons, silver launcher icon with black camera.
 - Layout: top bar = flash / chevron / settings; chevron opens options panel (HDR, timer, grid, processing level).
+- Floating bottom capsule with icon-only mode strip (name only on selected), capsule top buttons, redrawn iOS-style icons (ic_c_*, ic_m_*).
