@@ -42,3 +42,4 @@
 - iPhone Camera look: plain top icons, text-only mode row, dark round buttons, silver launcher icon with black camera.
 - Layout: top bar = flash / chevron / settings; chevron opens options panel (HDR, timer, grid, processing level).
 - Floating bottom capsule with icon-only mode strip (name only on selected), capsule top buttons, redrawn iOS-style icons (ic_c_*, ic_m_*).
+- Photo aspect ratios (9:16, 1:1, full, 3:4) with ViewPort + JPEG crop; preview extends under top bar and floating bottom capsule.

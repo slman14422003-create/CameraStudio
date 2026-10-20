@@ -80,7 +80,7 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
     private GridView grid;
     private View focusRing;
     private TextView status, hdrBtn, timerBtn, infoPill, countView, ratioPill;
-    private int vKind;
+    private int vKind, pKind;
     private LinearLayout lensRow;
     private LinearLayout topBar, optPanel;
     private ImageButton chevron;
@@ -186,6 +186,10 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         buildUi();
 
         engine = new CameraEngine(this, previewView, this);
+        {
+            int[] pd = ratioDims(pKind);
+            engine.presetPhotoRatio(pKind, pd[0], pd[1]);
+        }
 
         orient = new OrientationEventListener(this) {
             @Override
@@ -228,6 +232,9 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         col.setOrientation(LinearLayout.VERTICAL);
         root.addView(col, new FrameLayout.LayoutParams(-1, -1));
         colView = col;
+        col.addOnLayoutChangeListener((v, l, t, r, bt, ol, ot, or2, ob) -> {
+            if (bt - t != ob - ot) v.post(this::fitFloating);
+        });
 
         // ---- top bar
         LinearLayout top = new LinearLayout(this);
@@ -325,6 +332,7 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         holder.addView(infoPill, ip);
 
         vKind = Store.num(this, "vratio", 0);
+        pKind = Store.num(this, "pratio", 0);
         ratioPill = pill();
         ratioPill.setTextSize(12);
         ratioPill.setOnClickListener(v -> cycleVideoRatio());
@@ -391,7 +399,7 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         LinearLayout bottom = new LinearLayout(this);
         bottomBar = bottom;
         bottom.setOrientation(LinearLayout.VERTICAL);
-        bottom.setGravity(Gravity.CENTER);
+        bottom.setGravity(Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
         col.addView(bottom, new LinearLayout.LayoutParams(-1, 0, 1f));
 
         levelRow = new LinearLayout(this);
@@ -841,6 +849,10 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         }
         sub = newSub;
         if (m == CameraEngine.VIDEO) presetRatio();
+        else {
+            int[] pd = ratioDims(pKind);
+            engine.presetPhotoRatio(pKind, pd[0], pd[1]);
+        }
         if (m == CameraEngine.DEEP) engine.setDeepHires(deepWantsHires());
         engine.setMode(m);
         if (m == CameraEngine.VIDEO && Store.bool(this, "vaudio", true)
@@ -853,13 +865,18 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
     }
 
     private int[] ratioDims() {
-        int w = holder.getWidth() > 0 ? holder.getWidth() : getResources().getDisplayMetrics().widthPixels;
+        return ratioDims(vKind);
+    }
+
+    private int[] ratioDims(int k) {
+        int w = holder != null && holder.getWidth() > 0 ? holder.getWidth() : getResources().getDisplayMetrics().widthPixels;
         int h;
-        if (vKind == 0) h = w * 16 / 9;
-        else if (vKind == 1) h = w;
+        if (k == 0) h = w * 16 / 9;
+        else if (k == 1) h = w;
+        else if (k == 3) h = w * 4 / 3;
         else {
-            View par = (View) holder.getParent();
-            h = par.getHeight() > 0 ? par.getHeight() : getResources().getDisplayMetrics().heightPixels;
+            View par = holder == null ? null : (View) holder.getParent();
+            h = par != null && par.getHeight() > 0 ? par.getHeight() : getResources().getDisplayMetrics().heightPixels;
         }
         return new int[]{w, Math.max(1, h)};
     }
@@ -871,6 +888,14 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
 
     private void cycleVideoRatio() {
         if (recActive || counting || busy) return;
+        if (engine.mode() != CameraEngine.VIDEO) {
+            pKind = (pKind + 1) % 4;
+            Store.setNum(this, "pratio", pKind);
+            refreshModeUi();
+            int[] pd = ratioDims(pKind);
+            engine.setPhotoRatio(pKind, pd[0], pd[1]);
+            return;
+        }
         vKind = (vKind + 1) % 3;
         Store.setNum(this, "vratio", vKind);
         refreshModeUi();
@@ -879,7 +904,8 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
     }
 
     private void refreshRatioPill() {
-        ratioPill.setText(vKind == 0 ? "9:16" : vKind == 1 ? "1:1" : getString(R.string.cam_ratio_full));
+        int k = engine != null && engine.mode() == CameraEngine.VIDEO ? vKind : pKind;
+        ratioPill.setText(k == 0 ? "9:16" : k == 1 ? "1:1" : k == 3 ? "3:4" : getString(R.string.cam_ratio_full));
     }
 
     private boolean deepWantsHires() {
@@ -1051,18 +1077,19 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
             }
         }
         boolean vid = m == CameraEngine.VIDEO;
-        if (holder instanceof Ratio34) ((Ratio34) holder).setVideo(vid, vKind);
-        ratioPill.setVisibility(vid ? View.VISIBLE : View.GONE);
+        final int lk = vid ? vKind : pKind;
+        if (holder instanceof Ratio34) ((Ratio34) holder).setVideo(true, lk);
+        ratioPill.setVisibility(View.VISIBLE);
         refreshRatioPill();
         LinearLayout.LayoutParams hl = (LinearLayout.LayoutParams) holder.getLayoutParams();
-        final boolean full = vid && vKind == 2;
-        final boolean tall = vid && vKind == 0;
+        final boolean full = lk == 2;
+        final boolean tall = lk == 0;
         boolean overlap = full || tall;
         int topH = topBar != null && topBar.getHeight() > 0 ? topBar.getHeight() : dp(54);
         int overlapH = full ? dp(250) : tall ? dp(130) : 0;
         int wantBottom = -overlapH;
-        int wantTop = full ? -topH : 0;
-        if (vid && vKind == 1 && colView != null && colView.getHeight() > 0) {
+        int wantTop = (full || tall) ? -topH : 0;
+        if (lk == 1 && colView != null && colView.getHeight() > 0) {
             int hw = holder.getWidth() > 0 ? holder.getWidth() : getResources().getDisplayMetrics().widthPixels;
             int space = colView.getHeight() - topH - dp(250);
             wantTop = Math.max(0, (space - hw) / 2);
@@ -1072,8 +1099,8 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
             hl.topMargin = wantTop;
             holder.setLayoutParams(hl);
         }
-        if (topBar != null) topBar.setTranslationZ(full ? dp(6) : 0f);
-        int pillTop = full ? topH + dp(10) : dp(10);
+        if (topBar != null) topBar.setTranslationZ(full || tall ? dp(6) : 0f);
+        int pillTop = full || tall ? topH + dp(10) : dp(10);
         View[] pills = {status, infoPill, ratioPill};
         for (View pv : pills) {
             FrameLayout.LayoutParams pl = (FrameLayout.LayoutParams) pv.getLayoutParams();
@@ -1082,12 +1109,7 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
                 pv.setLayoutParams(pl);
             }
         }
-        FrameLayout.LayoutParams zl = (FrameLayout.LayoutParams) lensRow.getLayoutParams();
-        int lensMargin = dp(10) + overlapH;
-        if (zl.bottomMargin != lensMargin) {
-            zl.bottomMargin = lensMargin;
-            lensRow.setLayoutParams(zl);
-        }
+        colView.post(this::fitFloating);
         bottomBar.setBackground(null);
         levelRow.setVisibility(vid ? View.GONE : (m == CameraEngine.NIGHT || m == CameraEngine.DEEP || m == CameraEngine.HDR) ? View.INVISIBLE : View.VISIBLE);
         videoRow.setVisibility(vid ? View.VISIBLE : View.GONE);
@@ -1098,6 +1120,25 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         refreshInfoPill();
         if (m == CameraEngine.PRO && engine != null) rebuildPro();
         refreshTop();
+    }
+
+    private void fitFloating() {
+        if (holder == null || pod == null || lensRow == null) return;
+        int[] a = new int[2], b = new int[2];
+        holder.getLocationOnScreen(a);
+        pod.getLocationOnScreen(b);
+        int over = a[1] + holder.getHeight() - b[1];
+        int m = dp(10) + Math.max(0, over);
+        FrameLayout.LayoutParams zl = (FrameLayout.LayoutParams) lensRow.getLayoutParams();
+        if (zl.bottomMargin != m) {
+            zl.bottomMargin = m;
+            lensRow.setLayoutParams(zl);
+        }
+        FrameLayout.LayoutParams pl = (FrameLayout.LayoutParams) proPanel.getLayoutParams();
+        if (pl.bottomMargin != m + dp(46)) {
+            pl.bottomMargin = m + dp(46);
+            proPanel.setLayoutParams(pl);
+        }
     }
 
     private void setLevel(String l) {
@@ -1252,7 +1293,28 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         ByteBuffer buf = image.getPlanes()[0].getBuffer();
         byte[] b = new byte[buf.remaining()];
         buf.get(b);
-        return b;
+        return cropJpeg(b, image.getCropRect());
+    }
+
+    private static byte[] cropJpeg(byte[] b, android.graphics.Rect cr) {
+        try {
+            android.graphics.BitmapFactory.Options o = new android.graphics.BitmapFactory.Options();
+            o.inJustDecodeBounds = true;
+            android.graphics.BitmapFactory.decodeByteArray(b, 0, b.length, o);
+            int w = o.outWidth, h = o.outHeight;
+            if (cr == null || w <= 0 || cr.width() <= 0 || cr.height() <= 0) return b;
+            if (cr.width() >= w - 2 && cr.height() >= h - 2) return b;
+            if (cr.right > w || cr.bottom > h) return b;
+            android.graphics.BitmapRegionDecoder d = android.graphics.BitmapRegionDecoder.newInstance(b, 0, b.length, false);
+            Bitmap bm = d.decodeRegion(cr, null);
+            d.recycle();
+            java.io.ByteArrayOutputStream bo = new java.io.ByteArrayOutputStream(cr.width() * cr.height() / 4);
+            bm.compress(Bitmap.CompressFormat.JPEG, 100, bo);
+            bm.recycle();
+            return bo.toByteArray();
+        } catch (Throwable t) {
+            return b;
+        }
     }
 
     private void flashEffect() {
@@ -2064,12 +2126,12 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
             int height = width * 4 / 3;
             if (video) {
                 int avail = MeasureSpec.getSize(h);
-                height = kind == 1 ? width : width * 16 / 9;
+                height = kind == 1 ? width : kind == 3 ? width * 4 / 3 : width * 16 / 9;
                 View pv = (View) getParent();
                 int ph = pv == null ? 0 : pv.getHeight();
                 if (kind == 2 && ph > 0) height = ph;
                 else if (kind == 2 && avail > 0) height = avail;
-                else if (avail > 0 && kind != 1) height = Math.min(height, avail);
+                else if (avail > 0 && kind != 1 && kind != 3) height = Math.min(height, avail);
             }
             super.onMeasure(MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY),
                     MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY));

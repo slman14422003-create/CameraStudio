@@ -133,6 +133,8 @@ final class CameraEngine {
     private VideoFx fx;
     private int fxGen;
     private int vRatio;
+    private int pRatio;
+    private int pRatioW = 9, pRatioH = 16;
     private int vRatioW = 9, vRatioH = 16;
 
     // back lenses (ultra wide / main / tele) that CameraX exposes as separate cameras
@@ -343,6 +345,18 @@ final class CameraEngine {
         vRatio = kind;
         vRatioW = Math.max(1, w);
         vRatioH = Math.max(1, h);
+    }
+
+    void presetPhotoRatio(int kind, int w, int h) {
+        pRatio = kind;
+        pRatioW = Math.max(1, w);
+        pRatioH = Math.max(1, h);
+    }
+
+    void setPhotoRatio(int kind, int w, int h) {
+        boolean changed = pRatio != kind || (kind == 2 && (pRatioW != w || pRatioH != h));
+        presetPhotoRatio(kind, w, h);
+        if (changed && mode != VIDEO) bind();
     }
 
     int fxGen() {
@@ -747,8 +761,10 @@ final class CameraEngine {
                 // the exact biggest 4:3 size the camera reports: the normal one (binned, sharper in low light) or,
                 // with the full-resolution switch on, the biggest of all (50 MP on the Galaxy A16)
                 Size target = plainRes ? null : (hiresActive() ? maxSize : stdSize);
+                final boolean wide = !wantExt && !plainRes && !hiresActive() && (pRatio == 0 || pRatio == 2);
+                if (wide) target = null;
                 ResolutionSelector.Builder rb = new ResolutionSelector.Builder()
-                        .setAspectRatioStrategy(AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY)
+                        .setAspectRatioStrategy(wide ? AspectRatioStrategy.RATIO_16_9_FALLBACK_AUTO_STRATEGY : AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY)
                         .setAllowedResolutionMode(ResolutionSelector.PREFER_HIGHER_RESOLUTION_OVER_CAPTURE_RATE);
                 if (target != null) {
                     rb.setResolutionStrategy(new ResolutionStrategy(target,
@@ -760,7 +776,7 @@ final class CameraEngine {
                 }
                 ResolutionSelector shotRes = rb.build();
                 ResolutionSelector previewRes = new ResolutionSelector.Builder()
-                        .setAspectRatioStrategy(AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY).build();
+                        .setAspectRatioStrategy(wide ? AspectRatioStrategy.RATIO_16_9_FALLBACK_AUTO_STRATEGY : AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY).build();
 
                 Preview.Builder pb = new Preview.Builder().setResolutionSelector(previewRes);
                 new Camera2Interop.Extender<>(pb).setSessionCaptureCallback(new CameraCaptureSession.CaptureCallback() {
@@ -797,7 +813,14 @@ final class CameraEngine {
                 }
                 capture = ib.build();
 
-                camera = provider.bindToLifecycle(act, sel, preview, capture);
+                if (!wantExt && pRatio != 3) {
+                    Rational pr = pRatio == 1 ? new Rational(1, 1) : pRatio == 2 ? new Rational(pRatioW, pRatioH) : new Rational(9, 16);
+                    UseCaseGroup pg = new UseCaseGroup.Builder().addUseCase(preview).addUseCase(capture)
+                            .setViewPort(new ViewPort.Builder(pr, act.getWindowManager().getDefaultDisplay().getRotation()).build()).build();
+                    camera = provider.bindToLifecycle(act, sel, pg);
+                } else {
+                    camera = provider.bindToLifecycle(act, sel, preview, capture);
+                }
                 try {
                     if (capture.getResolutionInfo() != null) photoSize = capture.getResolutionInfo().getResolution();
                 } catch (Throwable ignored) {
