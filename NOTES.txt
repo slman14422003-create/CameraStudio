@@ -45,3 +45,4 @@
 - Photo aspect ratios (9:16, 1:1, full, 3:4) with ViewPort + JPEG crop; preview extends under top bar and floating bottom capsule.
 - Edge-to-edge window with transparent status/nav bars and inset handling; top and bottom scrims; pill polish.
 - New lens launcher icon (metal bezel, blue glass), matching splash, brand mark and themed icon; dark camera tool buttons.
+- Mode strip fits inside capsule (weighted chips), options panel fixed and animated, translucent glass surfaces, preview fade on rebind, intro/thumb/mode/lens animations.

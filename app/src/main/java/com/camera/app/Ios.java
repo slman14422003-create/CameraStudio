@@ -104,7 +104,7 @@ final class Ios {
         ImageView iv = (ImageView) item.getChildAt(0);
         GradientDrawable g = new GradientDrawable();
         g.setShape(GradientDrawable.OVAL);
-        g.setColor(on ? YELLOW : 0xCC2C2C2E);
+        g.setColor(on ? YELLOW : 0x66000000);
         iv.setBackground(g);
         iv.setImageTintList(ColorStateList.valueOf(on ? 0xFF000000 : 0xFFFFFFFF));
         ((TextView) item.getChildAt(1)).setTextColor(on ? YELLOW : 0xCCFFFFFF);
