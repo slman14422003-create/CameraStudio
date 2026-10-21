@@ -18,6 +18,7 @@ public class SettingsActivity extends BaseActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        Motion.install(this, R.anim.act_open_enter, R.anim.hold, R.anim.hold, R.anim.act_close_exit);
         setContentView(R.layout.activity_detail);
         useGroupedBackground();
         ((TextView) findViewById(R.id.title)).setText(R.string.settings);
@@ -27,6 +28,12 @@ public class SettingsActivity extends BaseActivity {
         if (refresh != null) refresh.setVisibility(View.GONE);
         content = findViewById(R.id.content);
         Ui.autoGroup(this, content);
+    }
+
+    @Override
+    public void finish() {
+        super.finish();
+        Motion.legacy(this, R.anim.hold, R.anim.act_close_exit);
     }
 
     @Override

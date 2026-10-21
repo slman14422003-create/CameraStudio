@@ -761,8 +761,7 @@ final class CameraEngine {
                 // the exact biggest 4:3 size the camera reports: the normal one (binned, sharper in low light) or,
                 // with the full-resolution switch on, the biggest of all (50 MP on the Galaxy A16)
                 Size target = plainRes ? null : (hiresActive() ? maxSize : stdSize);
-                final boolean wide = !wantExt && !plainRes && !hiresActive() && (pRatio == 0 || pRatio == 2);
-                if (wide) target = null;
+                final boolean wide = false;
                 ResolutionSelector.Builder rb = new ResolutionSelector.Builder()
                         .setAspectRatioStrategy(wide ? AspectRatioStrategy.RATIO_16_9_FALLBACK_AUTO_STRATEGY : AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY)
                         .setAllowedResolutionMode(ResolutionSelector.PREFER_HIGHER_RESOLUTION_OVER_CAPTURE_RATE);

@@ -114,8 +114,13 @@ final class Processor {
     }
 
     private static final ExecutorService EXEC = Executors.newSingleThreadExecutor(r -> {
-        Thread t = new Thread(r, "cam-processing");
-        t.setPriority(Thread.NORM_PRIORITY - 1);
+        Thread t = new Thread(() -> {
+            try {
+                android.os.Process.setThreadPriority(8);
+            } catch (Throwable ignored) {
+            }
+            r.run();
+        }, "cam-processing");
         return t;
     });
     private static final Handler MAIN = new Handler(Looper.getMainLooper());

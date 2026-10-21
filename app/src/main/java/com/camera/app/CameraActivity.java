@@ -83,6 +83,9 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
     private int vKind, pKind, insetTop, insetBottom, lastHl = -1, lastNear = -1;
     private boolean optOpen, introDone;
     private View fadeCover;
+    private EvView evView;
+    private int evStart;
+    private long evUntil;
     private LinearLayout lensRow;
     private LinearLayout topBar, optPanel;
     private ImageButton chevron;
@@ -185,6 +188,7 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         super.onCreate(savedInstanceState);
 
         level = Store.str(this, "level", Levels.MEDIUM);
+        getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.BLACK));
         try {
             WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
             getWindow().setStatusBarColor(Color.TRANSPARENT);
@@ -278,7 +282,10 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         top.addView(chevron, new LinearLayout.LayoutParams(dp(56), dp(44)));
         top.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1f));
         top.addView(glassIcon(R.drawable.ic_c_gear, R.string.settings,
-                v -> startActivity(new Intent(this, SettingsActivity.class))), new LinearLayout.LayoutParams(dp(44), dp(44)));
+                v -> {
+                    startActivity(new Intent(this, SettingsActivity.class));
+                    Motion.legacy(this, R.anim.act_open_enter, R.anim.hold);
+                }), new LinearLayout.LayoutParams(dp(44), dp(44)));
         col.addView(top, new LinearLayout.LayoutParams(-1, -2));
 
         optPanel = new LinearLayout(this);
@@ -292,6 +299,7 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         optPanel.setBackground(og);
         optPanel.setVisibility(View.GONE);
         optPanel.setTranslationZ(dp(10));
+        optPanel.setOutlineProvider(null);
         LinearLayout optRow = new LinearLayout(this);
         optRow.setOrientation(LinearLayout.HORIZONTAL);
         optRow.setGravity(Gravity.CENTER);
@@ -352,6 +360,9 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         focusRing.setBackground(ring);
         focusRing.setVisibility(View.INVISIBLE);
         holder.addView(focusRing, new FrameLayout.LayoutParams(dp(72), dp(72)));
+        evView = new EvView(this);
+        evView.setVisibility(View.INVISIBLE);
+        holder.addView(evView, new FrameLayout.LayoutParams(dp(40), dp(150)));
 
         status = pill();
         FrameLayout.LayoutParams sp = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.CENTER_HORIZONTAL);
@@ -417,6 +428,35 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
             }
         });
         final GestureDetector gd = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
+            @Override
+            public boolean onDown(MotionEvent e) {
+                evStart = engine.evIndex();
+                return true;
+            }
+
+            @Override
+            public boolean onScroll(MotionEvent e1, MotionEvent e2, float dx, float dy) {
+                if (e1 == null || SystemClock.uptimeMillis() > evUntil || !engine.evSupported) return false;
+                float vy = e1.getY() - e2.getY();
+                if (Math.abs(vy) < Math.abs(e2.getX() - e1.getX()) * 1.2f) return false;
+                int idx = Math.max(engine.evMin, Math.min(engine.evMax, evStart + Math.round(vy / dp(14))));
+                if (idx != engine.evIndex()) {
+                    engine.setEv(idx);
+                    evView.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
+                }
+                showEv();
+                return true;
+            }
+
+            @Override
+            public boolean onFling(MotionEvent e1, MotionEvent e2, float vx, float vy) {
+                if (e1 == null || optOpen || busy || recActive || counting) return false;
+                float ddx = e2.getX() - e1.getX(), ddy = e2.getY() - e1.getY();
+                if (Math.abs(vx) < 900 || Math.abs(ddx) < dp(80) || Math.abs(ddy) > Math.abs(ddx) * 0.6f) return false;
+                stepMode(ddx < 0 ? 1 : -1);
+                return true;
+            }
+
             @Override
             public boolean onSingleTapUp(MotionEvent e) {
                 if (optOpen) {
@@ -1054,14 +1094,18 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
             float st = lensStops.get(i);
             String plain = Math.abs(st - Math.round(st)) < 0.05f ? String.valueOf(Math.round(st))
                     : String.format(Locale.US, "%.1f", st);
-            b.setText(sel ? zoomText(display) : plain);
-            b.setTextSize(sel ? 13f : 12f);
-            b.setTextColor(sel ? Ios.YELLOW : 0xFFFFFFFF);
-            b.setMinWidth(dp(sel ? 46 : 34));
-            GradientDrawable g = new GradientDrawable();
-            g.setCornerRadius(dp(100));
-            g.setColor(sel ? 0x8C000000 : 0x00000000);
-            b.setBackground(g);
+            String txt = sel ? zoomText(display) : plain;
+            if (!txt.contentEquals(b.getText())) b.setText(txt);
+            if (!Boolean.valueOf(sel).equals(b.getTag())) {
+                b.setTag(sel);
+                b.setTextSize(sel ? 13f : 12f);
+                b.setTextColor(sel ? Ios.YELLOW : 0xFFFFFFFF);
+                b.setMinWidth(dp(sel ? 46 : 34));
+                GradientDrawable g = new GradientDrawable();
+                g.setCornerRadius(dp(100));
+                g.setColor(sel ? 0x8C000000 : 0x00000000);
+                b.setBackground(g);
+            }
         }
     }
 
@@ -1095,7 +1139,7 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         @Override
         public void run() {
             if (started && engine != null && !recActive && !counting) refreshInfoPill();
-            liveHand.postDelayed(this, 700);
+            liveHand.postDelayed(this, 900);
         }
     };
 
@@ -1116,8 +1160,9 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
                 if (iso > 0 && ns > 0) t += " · ISO " + iso + " · " + shutterText(ns);
             }
         }
-        infoPill.setText(t);
-        infoPill.setVisibility(t.isEmpty() ? View.GONE : View.VISIBLE);
+        if (!t.contentEquals(infoPill.getText())) infoPill.setText(t);
+        int iv = t.isEmpty() ? View.GONE : View.VISIBLE;
+        if (infoPill.getVisibility() != iv) infoPill.setVisibility(iv);
     }
 
     private void refreshModeUi() {
@@ -1365,7 +1410,42 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         }
     }
 
+    private void stepMode(int dir) {
+        int cur = sub != 0 ? sub : engine.mode();
+        int at = modeIds.indexOf(cur);
+        if (at < 0) return;
+        for (int i = at + dir; i >= 0 && i < modeChips.size(); i += dir) {
+            if (modeChips.get(i).getVisibility() == View.VISIBLE) {
+                holder.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
+                setMode(modeIds.get(i));
+                return;
+            }
+        }
+    }
+
+    private void showEv() {
+        if (!engine.evSupported || engine.evMax <= engine.evMin) return;
+        evView.set((engine.evIndex() - engine.evMin) / (float) (engine.evMax - engine.evMin));
+        evUntil = SystemClock.uptimeMillis() + 3200;
+        evView.animate().cancel();
+        evView.setVisibility(View.VISIBLE);
+        evView.setAlpha(1f);
+        evView.animate().alpha(0f).setStartDelay(2600).setDuration(350)
+                .withEndAction(() -> evView.setVisibility(View.INVISIBLE)).start();
+    }
+
+    private void placeEv(float x, float y) {
+        if (!engine.evSupported || (engine.mode() == CameraEngine.PRO && engine.manualFocus && engine.focus >= 0f)) return;
+        float w = holder.getWidth(), h = holder.getHeight();
+        float ex = x < w - dp(110) ? x + dp(50) : x - dp(90);
+        float ey = Math.max(dp(10), Math.min(h - dp(160), y - dp(75)));
+        evView.setX(ex);
+        evView.setY(ey);
+        showEv();
+    }
+
     private void showFocus(float x, float y) {
+        placeEv(x, y);
         if (engine.mode() == CameraEngine.PRO && engine.manualFocus && engine.focus >= 0f) return;
         focusRing.animate().cancel();
         focusRing.setX(x - dp(36));
@@ -2244,6 +2324,40 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         }
     }
 
+    private static final class EvView extends View {
+        private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private float v = 0.5f;
+
+        EvView(android.content.Context c) {
+            super(c);
+            p.setStrokeCap(Paint.Cap.ROUND);
+        }
+
+        void set(float val) {
+            v = Math.max(0f, Math.min(1f, val));
+            invalidate();
+        }
+
+        @Override
+        protected void onDraw(Canvas c) {
+            float u = Ui.dpf(getContext(), 1f);
+            float cx = getWidth() / 2f, top = 20f * u, bot = getHeight() - 20f * u;
+            float y = bot - (bot - top) * v;
+            p.setStyle(Paint.Style.STROKE);
+            p.setStrokeWidth(1.6f * u);
+            p.setColor(0xB3FFD60A);
+            c.drawLine(cx, top, cx, Math.max(top, y - 13f * u), p);
+            c.drawLine(cx, Math.min(bot, y + 13f * u), cx, bot, p);
+            p.setStrokeWidth(1.8f * u);
+            c.drawCircle(cx, y, 5.5f * u, p);
+            for (int i = 0; i < 8; i++) {
+                double a = i * Math.PI / 4;
+                float cs = (float) Math.cos(a), sn = (float) Math.sin(a);
+                c.drawLine(cx + cs * 8.5f * u, y + sn * 8.5f * u, cx + cs * 11f * u, y + sn * 11f * u, p);
+            }
+        }
+    }
+
     /** Horizon line: a short bar that turns yellow when the phone is perfectly level (uses the accelerometer). */
     private static final class LevelView extends View implements SensorEventListener {
         private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -2283,9 +2397,12 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
             float ax = e.values[0], ay = e.values[1], az = e.values[2];
             boolean upright = Math.abs(az) < 6f && ay > 4f;
             float r = (float) Math.toDegrees(Math.atan2(ax, ay));
-            roll = roll * 0.75f + r * 0.25f;
-            show = upright && Math.abs(roll) < 25f;
-            if (on) invalidate();
+            float nr = roll * 0.75f + r * 0.25f;
+            boolean ns = upright && Math.abs(nr) < 25f;
+            boolean changed = ns != show || Math.abs(nr - roll) > 0.25f;
+            roll = nr;
+            show = ns;
+            if (on && changed) invalidate();
         }
 
         @Override

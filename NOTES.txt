@@ -46,3 +46,6 @@
 - Edge-to-edge window with transparent status/nav bars and inset handling; top and bottom scrims; pill polish.
 - New lens launcher icon (metal bezel, blue glass), matching splash, brand mark and themed icon; dark camera tool buttons.
 - Mode strip fits inside capsule (weighted chips), options panel fixed and animated, translucent glass surfaces, preview fade on rebind, intro/thumb/mode/lens animations.
+- Smoothness: background-priority processing thread, lighter lens/info/level updates, no shadow under options panel, black window background for camera, lighter Camera<->Settings transitions (camera window held still).
+- New lens icon (blue/violet), swipe between modes, tap-focus exposure slider.
+- Fixed 9:16/full photos being captured at the small 16:9 size (3.7 MP): they now crop the 12 MP frame (about 9 MP).
