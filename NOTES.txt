@@ -49,3 +49,10 @@
 - Smoothness: background-priority processing thread, lighter lens/info/level updates, no shadow under options panel, black window background for camera, lighter Camera<->Settings transitions (camera window held still).
 - New lens icon (blue/violet), swipe between modes, tap-focus exposure slider.
 - Fixed 9:16/full photos being captured at the small 16:9 size (3.7 MP): they now crop the 12 MP frame (about 9 MP).
+2026-10-22
+- Processing: the luma denoise had a one sided spike test that replaced edge pixels and erased fine detail on sharp photos (detail kept about 15-45%, now 85-97% in the test set). Replaced by a patch based (non local means) filter with a 3x3 patch distance, tiled and cache friendly, signal and gain aware.
+- Post tone mapping denoise uses the same filter, skips areas that were not brightened and blends by gain.
+- Noise level is now measured on 3x3 patches of the quiet blocks (normalised for brightness), limited by the old estimate, so low noise shots are no longer treated as noise free.
+- Chroma denoise: much narrower ranges, stronger in dark areas, no more colour bleeding on small coloured detail.
+- Multi frame merge: sub pixel tile alignment, smooth offset field (no tile seams), bicubic resampling, noise estimate from the new measure.
+- Measured on synthetic native resolution scenes: fidelity to the clean picture up by 3 to 10 dB in PSNR, 12 MP time about the same as before.

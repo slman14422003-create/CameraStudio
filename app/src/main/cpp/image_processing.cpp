@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <vector>
 #include <thread>
 
 namespace cam {
@@ -55,6 +56,27 @@ inline float fastExp2(float x) {
     return p * sc;
 }
 
+inline float expNeg(float e) {
+    float t = 1.442695f * e;
+    t = t > 24.f ? 24.f : t;
+    float u = 24.f - t;
+    int iu = (int) u;
+    float f = u - (float) iu;
+    float p = 1.0f + f * (0.6931472f + f * (0.2402265f + f * (0.0555041f + f * 0.0096181f)));
+    uint32_t bits = (uint32_t) (iu + 103) << 23;
+    float sc;
+    std::memcpy(&sc, &bits, 4);
+    return p * sc;
+}
+
+inline void cubicWeights(float t, float* w4) {
+    float t2 = t * t, t3 = t2 * t;
+    w4[0] = -0.5f * t3 + t2 - 0.5f * t;
+    w4[1] = 1.5f * t3 - 2.5f * t2 + 1.f;
+    w4[2] = -1.5f * t3 + 2.f * t2 + 0.5f * t;
+    w4[3] = 0.5f * t3 - 0.5f * t2;
+}
+
 inline float lumaF(const uint8_t* p) { return 0.299f * p[0] + 0.587f * p[1] + 0.114f * p[2]; }
 inline int lumaAt(const uint8_t* rgba, int stride, int x, int y) {
     const uint8_t* p = rgba + (size_t) y * stride + (size_t) x * 4;
@@ -90,6 +112,57 @@ float noiseFromLuma(const uint8_t* rgba, int stride, int w, int h) {
     // response std = 6 * sigma; median of |N(0, s)| = 0.6745 s
     float s = med / (6.f * 0.6745f);
     return clampf(s, 0.6f, 14.f);
+}
+
+inline float noiseShape(float luma) { return (2.f - clampf(luma, 0.f, 255.f) * (1.f / 255.f)) * (1.f / 1.5f); }
+
+float noiseFromPatches(const uint8_t* rgba, int stride, int w, int h) {
+    constexpr int B = 32, OFF = 3, SN = B + OFF + 2;
+    if (w < 3 * B || h < 3 * B) return noiseFromLuma(rgba, stride, w, h);
+    const int bw = (w - OFF - 2) / B, bh = (h - OFF - 2) / B;
+    const int stepB = std::max(1, (int) std::ceil(std::sqrt((double) bw * bh / 3000.0)));
+    std::vector<float> ratio;
+    float tile[SN * SN];
+    float pdv[2 * (B / 2) * (B / 2)];
+    for (int by = 0; by < bh; by += stepB) {
+        for (int bx = 0; bx < bw; bx += stepB) {
+            const int x0 = bx * B, y0 = by * B;
+            float meanL = 0.f;
+            for (int y = 0; y < SN; y++) {
+                const uint8_t* q = rgba + (size_t) (y0 + y) * stride + (size_t) x0 * 4;
+                for (int x = 0; x < SN; x++, q += 4) tile[y * SN + x] = 0.299f * q[0] + 0.587f * q[1] + 0.114f * q[2];
+            }
+            for (int y = 1; y <= B; y++)
+                for (int x = 1; x <= B; x++) meanL += tile[y * SN + x];
+            meanL /= (float) (B * B);
+            if (meanL < 6.f || meanL > 248.f) continue;
+            int n = 0;
+            for (int dir = 0; dir < 2; dir++) {
+                const int ox = dir == 0 ? OFF : 0, oy = dir == 0 ? 0 : OFF;
+                for (int y = 1; y < B; y += 2) {
+                    for (int x = 1; x < B; x += 2) {
+                        float sum = 0.f;
+                        for (int j = -1; j <= 1; j++)
+                            for (int i = -1; i <= 1; i++) {
+                                float d = tile[(y + j) * SN + (x + i)] - tile[(y + j + oy) * SN + (x + i + ox)];
+                                sum += d * d;
+                            }
+                        pdv[n++] = sum * (1.f / 9.f);
+                    }
+                }
+            }
+            const int k = (int) (0.4f * n);
+            std::nth_element(pdv, pdv + k, pdv + n);
+            float sg = std::sqrt(pdv[k] / (2.f * 0.8174f));
+            ratio.push_back(sg / noiseShape(meanL));
+        }
+    }
+    const float lap = noiseFromLuma(rgba, stride, w, h);
+    if (ratio.size() < 12) return lap;
+    const size_t k = ratio.size() / 4;
+    std::nth_element(ratio.begin(), ratio.begin() + k, ratio.end());
+    const float hi = 1.25f * std::sqrt(lap * lap + 6.25f);
+    return clampf(ratio[k], 0.9f * lap, hi);
 }
 
 // =============================================================== global analysis
@@ -162,7 +235,7 @@ void guidedSmooth(const std::vector<float>& I, std::vector<float>& q, int w, int
 
 Global analyse(const uint8_t* rgba, int w, int h, int stride, const EnhanceParams& p) {
     Global g;
-    g.sigma = noiseFromLuma(rgba, stride, w, h);
+    g.sigma = noiseFromPatches(rgba, stride, w, h);
 
     // small RGB image (block averages)
     const int maxDim = std::max(w, h);
@@ -359,111 +432,177 @@ void gaussBlur(const float* src, float* dst, float* tmp, int w, int rows, const 
     });
 }
 
-// Signal dependent edge preserving 5x5 luma filter. Dark areas are noisier, so they are filtered more.
+constexpr int kTileW = 192;
+constexpr int kTileH = 32;
+constexpr float kPostGainMin = 1.08f;
+constexpr float kPostGainSpan = 0.4f;
+
+struct NlmScratch {
+    std::vector<float> P, Q, D, Hh, num, den, inv, thr;
+    NlmScratch() {
+        const int pw = kTileW + 8, ph = kTileH + 8;
+        P.resize((size_t) pw * ph);
+        Q.resize((size_t) pw * ph);
+        D.resize((size_t) (kTileW + 2) * (kTileH + 2));
+        Hh.resize((size_t) kTileW * (kTileH + 2));
+        num.resize((size_t) kTileW * kTileH);
+        den.resize(num.size());
+        inv.resize(num.size());
+        thr.resize(num.size());
+    }
+};
+
+void lumaNlm(const float* src, float* dst, const float* gain, int w, int rows, float noise, float h, int R, float darkK, bool impulse) {
+    const int M = R + 1;
+    const float ssp = R <= 2 ? 2.0f : 2.5f;
+    float spat[7][7];
+    for (int dy = -R; dy <= R; dy++)
+        for (int dx = -R; dx <= R; dx++) spat[dy + R][dx + R] = std::exp(-(dx * dx + dy * dy) / (2.f * ssp * ssp));
+    const float darkNorm = 1.f / (1.f + 0.5f * darkK);
+    const float h2 = h * h;
+    const float spikeT = std::max(10.f, 6.f * noise);
+    parallelFor(rows, [&](int ya, int yb) {
+        NlmScratch S;
+        for (int y0 = ya; y0 < yb; y0 += kTileH) {
+            const int y1 = std::min(yb, y0 + kTileH), th = y1 - y0;
+            for (int x0 = 0; x0 < w; x0 += kTileW) {
+                const int x1 = std::min(w, x0 + kTileW), tw = x1 - x0;
+                const int PW = tw + 2 * M, PH = th + 2 * M;
+                if (gain) {
+                    float gm = 0.f;
+                    for (int r = 0; r < th; r++) {
+                        const float* gp = gain + (size_t) (y0 + r) * w + x0;
+                        for (int x = 0; x < tw; x++) gm = std::max(gm, gp[x]);
+                    }
+                    if (gm < kPostGainMin) {
+                        for (int r = 0; r < th; r++)
+                            std::memcpy(dst + (size_t) (y0 + r) * w + x0, src + (size_t) (y0 + r) * w + x0, (size_t) tw * sizeof(float));
+                        continue;
+                    }
+                }
+                for (int i = 0; i < PH; i++) {
+                    const float* s = src + (size_t) clampi(y0 - M + i, 0, rows - 1) * w;
+                    float* p = &S.P[(size_t) i * PW];
+                    for (int j = 0; j < PW; j++) p[j] = s[clampi(x0 - M + j, 0, w - 1)];
+                }
+                const float* Q = S.P.data();
+                if (impulse) {
+                    std::memcpy(S.Q.data(), S.P.data(), (size_t) PW * PH * sizeof(float));
+                    for (int i = 1; i < PH - 1; i++) {
+                        const float* u = &S.P[(size_t) (i - 1) * PW];
+                        const float* m = &S.P[(size_t) i * PW];
+                        const float* d = &S.P[(size_t) (i + 1) * PW];
+                        float* o = &S.Q[(size_t) i * PW];
+                        for (int j = 1; j < PW - 1; j++) {
+                            float mx = std::max(std::max(std::max(u[j - 1], u[j]), std::max(u[j + 1], m[j - 1])),
+                                                std::max(std::max(m[j + 1], d[j - 1]), std::max(d[j], d[j + 1])));
+                            float mn = std::min(std::min(std::min(u[j - 1], u[j]), std::min(u[j + 1], m[j - 1])),
+                                                std::min(std::min(m[j + 1], d[j - 1]), std::min(d[j], d[j + 1])));
+                            float c = m[j];
+                            if (c > mx + spikeT || c < mn - spikeT)
+                                o[j] = (u[j - 1] + u[j] + u[j + 1] + m[j - 1] + m[j + 1] + d[j - 1] + d[j] + d[j + 1]) * 0.125f;
+                        }
+                    }
+                    Q = S.Q.data();
+                }
+                for (int r = 0; r < th; r++) {
+                    const float* c0 = &Q[(size_t) (M + r) * PW + M];
+                    const float* cu = c0 - PW;
+                    const float* cd = c0 + PW;
+                    const float* gp = gain ? gain + (size_t) (y0 + r) * w + x0 : nullptr;
+                    float* nm = &S.num[(size_t) r * tw];
+                    float* dn = &S.den[(size_t) r * tw];
+                    float* iv = &S.inv[(size_t) r * tw];
+                    float* tr = &S.thr[(size_t) r * tw];
+                    for (int x = 0; x < tw; x++) {
+                        float c = c0[x];
+                        float mm = (c + cu[x] + cd[x] + c0[x - 1] + c0[x + 1]) * 0.2f;
+                        float sl;
+                        if (gp) {
+                            float gg = std::max(1.f, gp[x]);
+                            sl = noise * gg * noiseShape(mm / gg);
+                        } else {
+                            sl = noise * (1.f + darkK * (1.f - mm * (1.f / 255.f))) * darkNorm;
+                        }
+                        sl = std::max(sl, 0.35f);
+                        tr[x] = 2.f * sl * sl;
+                        iv[x] = 1.f / (h2 * sl * sl);
+                        nm[x] = c;
+                        dn[x] = 1.f;
+                    }
+                }
+                for (int dy = -R; dy <= R; dy++) {
+                    for (int dx = -R; dx <= R; dx++) {
+                        if (dx == 0 && dy == 0) continue;
+                        const float sw = spat[dy + R][dx + R];
+                        for (int rp = 0; rp < th + 2; rp++) {
+                            const float* a = &Q[(size_t) (M - 1 + rp) * PW + (M - 1)];
+                            const float* b = &Q[(size_t) (M - 1 + rp + dy) * PW + (M - 1 + dx)];
+                            float* d = &S.D[(size_t) rp * (tw + 2)];
+                            for (int xp = 0; xp < tw + 2; xp++) {
+                                float t = a[xp] - b[xp];
+                                d[xp] = t * t;
+                            }
+                            const float* dd = d;
+                            float* hh = &S.Hh[(size_t) rp * tw];
+                            for (int x = 0; x < tw; x++) hh[x] = dd[x] + dd[x + 1] + dd[x + 2];
+                        }
+                        for (int r = 0; r < th; r++) {
+                            const float* h0 = &S.Hh[(size_t) r * tw];
+                            const float* h1 = h0 + tw;
+                            const float* h2p = h1 + tw;
+                            const float* nb = &Q[(size_t) (M + r + dy) * PW + M + dx];
+                            const float* tr = &S.thr[(size_t) r * tw];
+                            const float* iv = &S.inv[(size_t) r * tw];
+                            float* nm = &S.num[(size_t) r * tw];
+                            float* dn = &S.den[(size_t) r * tw];
+                            for (int x = 0; x < tw; x++) {
+                                float pd = (h0[x] + h1[x] + h2p[x]) * (1.f / 9.f);
+                                float e = pd - tr[x];
+                                e = e > 0.f ? e * iv[x] : 0.f;
+                                float wg = sw * expNeg(e);
+                                nm[x] += wg * nb[x];
+                                dn[x] += wg;
+                            }
+                        }
+                    }
+                }
+                for (int r = 0; r < th; r++) {
+                    const float* nm = &S.num[(size_t) r * tw];
+                    const float* dn = &S.den[(size_t) r * tw];
+                    float* o = dst + (size_t) (y0 + r) * w + x0;
+                    if (gain) {
+                        const float* gp = gain + (size_t) (y0 + r) * w + x0;
+                        const float* c0 = &Q[(size_t) (M + r) * PW + M];
+                        for (int x = 0; x < tw; x++) {
+                            float f = clampf((gp[x] - kPostGainMin) * (1.f / kPostGainSpan), 0.f, 1.f);
+                            o[x] = c0[x] + f * (nm[x] / dn[x] - c0[x]);
+                        }
+                    } else {
+                        for (int x = 0; x < tw; x++) o[x] = nm[x] / dn[x];
+                    }
+                }
+            }
+        }
+    });
+}
+
 void lumaDenoise(const float* src, float* dst, int w, int rows, float sigma, float strength) {
     if (strength <= 0.01f) {
         std::memcpy(dst, src, (size_t) w * rows * sizeof(float));
         return;
     }
-    const float sr = sigma * (0.8f + 2.4f * strength);
-    const float ss = 1.0f + 0.5f * strength;
-    float spat[5][5];
-    for (int dy = -2; dy <= 2; dy++)
-        for (int dx = -2; dx <= 2; dx++) spat[dy + 2][dx + 2] = std::exp(-(dx * dx + dy * dy) / (2.f * ss * ss));
-    float lut[200];
-    for (int i = 0; i < 200; i++) {
-        float t = i / 32.f;
-        lut[i] = std::exp(-0.5f * t * t);
-    }
-    parallelFor(rows, [&](int y0, int y1) {
-        for (int y = y0; y < y1; y++) {
-            const float* rowsP[5];
-            for (int dy = -2; dy <= 2; dy++) rowsP[dy + 2] = src + (size_t) clampi(y + dy, 0, rows - 1) * w;
-            float* d = dst + (size_t) y * w;
-            for (int x = 0; x < w; x++) {
-                float c = rowsP[2][x];
-                {
-                    // an isolated spike is not part of the picture: compare against the neighbourhood instead
-                    float m = 0;
-                    for (int dy = 1; dy <= 3; dy++) {
-                        const float* rp = rowsP[dy];
-                        m += rp[clampi(x - 1, 0, w - 1)] + rp[x] + rp[clampi(x + 1, 0, w - 1)];
-                    }
-                    m = (m - c) / 8.f;
-                    if (std::fabs(c - m) > 2.4f * sr) c = m;
-                }
-                float inv = 1.f / (sr * (1.f + 0.8f * (1.f - c / 255.f)));
-                float num = 0, den = 0;
-                for (int dy = 0; dy < 5; dy++) {
-                    const float* rp = rowsP[dy];
-                    for (int dx = -2; dx <= 2; dx++) {
-                        float v = rp[clampi(x + dx, 0, w - 1)];
-                        int idx = (int) (std::fabs(v - c) * inv * 32.f);
-                        float wt = spat[dy][dx + 2] * (idx < 200 ? lut[idx] : 0.f);
-                        num += wt * v;
-                        den += wt;
-                    }
-                }
-                d[x] = den > 0 ? num / den : c;
-            }
-        }
-    });
+    lumaNlm(src, dst, nullptr, w, rows, sigma, 0.55f + 1.5f * strength, 2, 1.0f, true);
 }
 
-// Second luma filter AFTER the tone mapping: the lift multiplies the noise, so the filter strength follows
-// the gain of each pixel (dark areas that were brightened a lot get filtered more).
 void lumaDenoisePost(const float* src, float* dst, const float* gain, int w, int rows, float noise, float strength) {
-    float spat[5][5];
-    for (int dy = -2; dy <= 2; dy++)
-        for (int dx = -2; dx <= 2; dx++) spat[dy + 2][dx + 2] = std::exp(-(dx * dx + dy * dy) / (2.f * 1.2f * 1.2f));
-    float lut[200];
-    for (int i = 0; i < 200; i++) {
-        float t = i / 32.f;
-        lut[i] = std::exp(-0.5f * t * t);
-    }
-    parallelFor(rows, [&](int y0, int y1) {
-        for (int y = y0; y < y1; y++) {
-            const float* rowsP[5];
-            for (int dy = -2; dy <= 2; dy++) rowsP[dy + 2] = src + (size_t) clampi(y + dy, 0, rows - 1) * w;
-            const float* gp = gain + (size_t) y * w;
-            float* d = dst + (size_t) y * w;
-            for (int x = 0; x < w; x++) {
-                float c = rowsP[2][x];
-                float sr = noise * std::max(1.f, gp[x]) * (1.1f + 1.4f * strength);
-                {
-                    float m = 0;
-                    for (int dy = 1; dy <= 3; dy++) {
-                        const float* rp = rowsP[dy];
-                        m += rp[clampi(x - 1, 0, w - 1)] + rp[x] + rp[clampi(x + 1, 0, w - 1)];
-                    }
-                    m = (m - c) / 8.f;
-                    if (std::fabs(c - m) > 2.4f * sr) c = m;
-                }
-                float inv = 1.f / std::max(0.5f, sr);
-                float num = 0, den = 0;
-                for (int dy = 0; dy < 5; dy++) {
-                    const float* rp = rowsP[dy];
-                    for (int dx = -2; dx <= 2; dx++) {
-                        float v = rp[clampi(x + dx, 0, w - 1)];
-                        int idx = (int) (std::fabs(v - c) * inv * 32.f);
-                        float wt = spat[dy][dx + 2] * (idx < 200 ? lut[idx] : 0.f);
-                        num += wt * v;
-                        den += wt;
-                    }
-                }
-                d[x] = den > 0 ? num / den : c;
-            }
-        }
-    });
+    lumaNlm(src, dst, gain, w, rows, noise, 0.55f + 1.5f * strength, 2, 0.f, false);
 }
 
-// Chroma noise removal at half resolution, guided by the luma so colours do not bleed over edges.
 void chromaDenoise(float* cb, float* cr, const float* yGuide, int hw, int hr, float sigma, float strength) {
-    const float sY = 10.f + 3.f * sigma;
-    const float sC = 4.f + 16.f * strength + 1.5f * sigma;
-    float lutY[256], lutC[1024];
-    for (int i = 0; i < 256; i++) lutY[i] = std::exp(-(float) (i * i) / (2.f * sY * sY));
-    for (int i = 0; i < 1024; i++) lutC[i] = std::exp(-(float) (i * 4) / (2.f * sC * sC));
+    const float sY = 5.f + 1.8f * sigma;
+    const float sC = 1.2f + 4.f * strength + 0.7f * sigma;
+    const float invY = 1.f / (2.f * sY * sY);
     float spat[5][5];
     for (int dy = -2; dy <= 2; dy++)
         for (int dx = -2; dx <= 2; dx++) spat[dy + 2][dx + 2] = std::exp(-(dx * dx + dy * dy) / (2.f * 1.3f * 1.3f));
@@ -475,15 +614,16 @@ void chromaDenoise(float* cb, float* cr, const float* yGuide, int hw, int hr, fl
                 for (int x = 0; x < hw; x++) {
                     size_t ci = (size_t) y * hw + x;
                     float gy = yGuide[ci], pb = cb[ci], pr = cr[ci];
+                    float sc = sC * (0.6f + 0.9f * (1.f - clampf(gy, 0.f, 255.f) * (1.f / 255.f)));
+                    float invC = 1.f / (2.f * sc * sc);
                     float nb = 0, nr = 0, den = 0;
                     for (int dy = -2; dy <= 2; dy++) {
                         int yy = clampi(y + dy, 0, hr - 1);
                         for (int dx = -2; dx <= 2; dx++) {
                             size_t j = (size_t) yy * hw + clampi(x + dx, 0, hw - 1);
-                            int dY = std::min(255, (int) std::fabs(yGuide[j] - gy));
+                            float dY = yGuide[j] - gy;
                             float db = cb[j] - pb, dr = cr[j] - pr;
-                            int dC = std::min(1023, (int) ((db * db + dr * dr) * 0.25f));
-                            float wt = spat[dy + 2][dx + 2] * lutY[dY] * lutC[dC];
+                            float wt = spat[dy + 2][dx + 2] * expNeg(dY * dY * invY + (db * db + dr * dr) * invC);
                             nb += wt * cb[j];
                             nr += wt * cr[j];
                             den += wt;
@@ -766,7 +906,7 @@ bool Merger::add(const uint8_t* rgba, int stride) {
 
     const int tile = tile_;
     const int tilesX = (w_ + tile - 1) / tile, tilesY = (h_ + tile - 1) / tile;
-    std::vector<int16_t> offX((size_t) tilesX * tilesY, 0), offY((size_t) tilesX * tilesY, 0);
+    std::vector<float> offX((size_t) tilesX * tilesY, 0.f), offY((size_t) tilesX * tilesY, 0.f);
 
     if (n_ == 0) {
         refSmall_ = small;
@@ -775,7 +915,7 @@ bool Merger::add(const uint8_t* rgba, int stride) {
             for (int y = y0; y < y1; y++)
                 for (int x = 0; x < w_; x++) refY_[(size_t) y * w_ + x] = (uint8_t) lumaAt(rgba, stride, x, y);
         });
-        sigma_ = noiseFromLuma(rgba, stride, w_, h_);
+        sigma_ = noiseFromPatches(rgba, stride, w_, h_);
     } else {
         // global shift: coarse search at 1/4 size: +-12 px => +-48 px on the full image
         const int R = 12;
@@ -848,39 +988,108 @@ bool Merger::add(const uint8_t* rgba, int stride) {
                             if (bestS < 0 || sad < bestS) { bestS = sad; bxx = cx; byy = cy; }
                         }
                     }
-                    offX[(size_t) ty * tilesX + tx] = (int16_t) bxx;
-                    offY[(size_t) ty * tilesX + tx] = (int16_t) byy;
+                    auto ssd = [&](int cx, int cy) -> double {
+                        double sum = 0;
+                        int samples = 0;
+                        for (int y = ya; y < yb; y += 2) {
+                            int sy = y + cy;
+                            if (sy < 0 || sy >= h_) continue;
+                            for (int x = xa; x < xb; x += 2) {
+                                int sx = x + cx;
+                                if (sx < 0 || sx >= w_) continue;
+                                double d = (double) refY_[(size_t) y * w_ + x] - lumaAt(rgba, stride, sx, sy);
+                                sum += d * d;
+                                samples++;
+                            }
+                        }
+                        return samples ? sum / samples : -1.0;
+                    };
+                    float fx = 0.f, fy = 0.f;
+                    if (std::abs(bxx - dx) < 3 && std::abs(byy - dy) < 3) {
+                        double s0 = ssd(bxx, byy), xm = ssd(bxx - 1, byy), xp = ssd(bxx + 1, byy);
+                        double ym = ssd(bxx, byy - 1), yp = ssd(bxx, byy + 1);
+                        if (s0 >= 0 && xm >= 0 && xp >= 0 && ym >= 0 && yp >= 0) {
+                            double cxq = xm - 2 * s0 + xp, cyq = ym - 2 * s0 + yp;
+                            if (cxq > 1.0) fx = clampf((float) ((xm - xp) / (2 * cxq)), -0.5f, 0.5f);
+                            if (cyq > 1.0) fy = clampf((float) ((ym - yp) / (2 * cyq)), -0.5f, 0.5f);
+                        }
+                    }
+                    offX[(size_t) ty * tilesX + tx] = (float) bxx + fx;
+                    offY[(size_t) ty * tilesX + tx] = (float) byy + fy;
                 }
             }
         });
     }
     if (n_ == 0) {
-        for (size_t i = 0; i < offX.size(); i++) { offX[i] = 0; offY[i] = 0; }
+        for (size_t i = 0; i < offX.size(); i++) { offX[i] = 0.f; offY[i] = 0.f; }
     }
 
     // noise aware motion rejection: a pixel may differ from the running mean by about 3 sigma
     float thrTable[256];
     for (int c = 0; c < 256; c++) thrTable[c] = clampf(3.0f * sigma_ * std::sqrt(1.f + 1.f / std::max(1, c)) + 3.f, 12.f, 70.f);
 
+    const bool warp = n_ > 0;
     parallelFor(h_, [&](int y0, int y1) {
+        std::vector<float> rowX((size_t) w_), rowY((size_t) w_);
         for (int y = y0; y < y1; y++) {
-            const int ty = y / tile;
+            if (warp) {
+                float vy = (y + 0.5f) / tile - 0.5f;
+                int ty0 = clampi((int) std::floor(vy), 0, tilesY - 1), ty1 = std::min(ty0 + 1, tilesY - 1);
+                float wy = clampf(vy - ty0, 0.f, 1.f);
+                for (int x = 0; x < w_; x++) {
+                    float vx = (x + 0.5f) / tile - 0.5f;
+                    int tx0 = clampi((int) std::floor(vx), 0, tilesX - 1), tx1 = std::min(tx0 + 1, tilesX - 1);
+                    float wx = clampf(vx - tx0, 0.f, 1.f);
+                    size_t i00 = (size_t) ty0 * tilesX + tx0, i01 = (size_t) ty0 * tilesX + tx1;
+                    size_t i10 = (size_t) ty1 * tilesX + tx0, i11 = (size_t) ty1 * tilesX + tx1;
+                    rowX[x] = (offX[i00] * (1.f - wx) + offX[i01] * wx) * (1.f - wy) + (offX[i10] * (1.f - wx) + offX[i11] * wx) * wy;
+                    rowY[x] = (offY[i00] * (1.f - wx) + offY[i01] * wx) * (1.f - wy) + (offY[i10] * (1.f - wx) + offY[i11] * wx) * wy;
+                }
+            }
             for (int x = 0; x < w_; x++) {
-                const size_t ti = (size_t) ty * tilesX + x / tile;
-                int sy = y + offY[ti], sx = x + offX[ti];
-                if (sy < 0 || sy >= h_ || sx < 0 || sx >= w_) continue;
-                const uint8_t* p = rgba + (size_t) sy * stride + (size_t) sx * 4;
+                int pr, pg, pb;
+                if (warp) {
+                    float fxp = x + rowX[x], fyp = y + rowY[x];
+                    if (fxp < 0.f || fyp < 0.f || fxp > w_ - 1.001f || fyp > h_ - 1.001f) continue;
+                    int ix = (int) fxp, iy = (int) fyp;
+                    float ax = fxp - ix, ay = fyp - iy;
+                    float wxs[4], wys[4];
+                    cubicWeights(ax, wxs);
+                    cubicWeights(ay, wys);
+                    float sr = 0.f, sg = 0.f, sb = 0.f;
+                    for (int j = 0; j < 4; j++) {
+                        const uint8_t* row = rgba + (size_t) clampi(iy - 1 + j, 0, h_ - 1) * stride;
+                        float r0 = 0.f, g0 = 0.f, b0 = 0.f;
+                        for (int i = 0; i < 4; i++) {
+                            const uint8_t* q = row + (size_t) clampi(ix - 1 + i, 0, w_ - 1) * 4;
+                            r0 += wxs[i] * q[0];
+                            g0 += wxs[i] * q[1];
+                            b0 += wxs[i] * q[2];
+                        }
+                        sr += wys[j] * r0;
+                        sg += wys[j] * g0;
+                        sb += wys[j] * b0;
+                    }
+                    pr = clampi((int) (sr + 0.5f), 0, 255);
+                    pg = clampi((int) (sg + 0.5f), 0, 255);
+                    pb = clampi((int) (sb + 0.5f), 0, 255);
+                } else {
+                    const uint8_t* p = rgba + (size_t) y * stride + (size_t) x * 4;
+                    pr = p[0];
+                    pg = p[1];
+                    pb = p[2];
+                }
                 size_t i = (size_t) y * w_ + x;
                 uint16_t* a = &acc_[i * 3];
                 int c = cnt_[i];
                 if (c > 0) {
                     float thr = thrTable[c];
                     float mr = (float) a[0] / c, mg = (float) a[1] / c, mb = (float) a[2] / c;
-                    if (std::fabs(p[0] - mr) > thr || std::fabs(p[1] - mg) > thr || std::fabs(p[2] - mb) > thr) continue;
+                    if (std::fabs(pr - mr) > thr || std::fabs(pg - mg) > thr || std::fabs(pb - mb) > thr) continue;
                 }
-                a[0] += p[0];
-                a[1] += p[1];
-                a[2] += p[2];
+                a[0] += pr;
+                a[1] += pg;
+                a[2] += pb;
                 cnt_[i] = (uint8_t) (c + 1);
             }
         }
