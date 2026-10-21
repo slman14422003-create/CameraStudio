@@ -14,6 +14,7 @@
 
     <string name="cam_flash">الفلاش</string>
     <string name="cam_grid">شبكة التكوين</string>
+    <string name="cam_video_quality">جودة الفيديو</string>
     <string name="cam_processing">المعالجة</string>
     <string name="cam_processing_now">جارٍ تحسين الصورة…</string>
     <string name="cam_open_gallery">فتح المعرض</string>

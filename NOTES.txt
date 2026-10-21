@@ -56,3 +56,9 @@
 - Chroma denoise: much narrower ranges, stronger in dark areas, no more colour bleeding on small coloured detail.
 - Multi frame merge: sub pixel tile alignment, smooth offset field (no tile seams), bicubic resampling, noise estimate from the new measure.
 - Measured on synthetic native resolution scenes: fidelity to the clean picture up by 3 to 10 dB in PSNR, 12 MP time about the same as before.
+- Video: the SD / HD / FHD buttons moved into the chevron options panel (they were drawn over the 0.6 / 1x / 2 / 4 lens buttons); the info pill (FHD · 30) opens that panel in video mode.
+- Grid lines now stop under the top bar and above the bottom capsule instead of running through the controls.
+- Top pills aligned with the flash and settings buttons (same 12 dp edge).
+- Preview height calculation no longer depends on the measured top bar height, so 9:16 / full previews always reach the top of the screen.
+- Top pills: the capture / recording status pill ("Hold still 2/3", timer, "Enhancing photo") now sits on its own row under the info and ratio pills, so they can no longer overlap.
+- Lens row and pro panel position now comes from layout positions (not screen positions affected by the intro animation) and is refreshed whenever the preview, top bar or bottom capsule change size; fixes the 0.6 / 1x / 2 / 4 buttons landing on the mode strip.

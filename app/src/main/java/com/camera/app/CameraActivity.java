@@ -93,7 +93,7 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
     private final List<TextView> lensBtns = new ArrayList<>();
     private final List<Float> lensStops = new ArrayList<>();
     private LevelView levelView;
-    private LinearLayout videoRow;
+    private LinearLayout videoRow, videoBox;
     private final List<TextView> videoChips = new ArrayList<>();
     private boolean recActive, counting, lastIsVideo, multiShot;
     private float pendingStop = -1f;
@@ -366,18 +366,21 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
 
         status = pill();
         FrameLayout.LayoutParams sp = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.CENTER_HORIZONTAL);
-        sp.topMargin = dp(10);
+        sp.topMargin = dp(50);
         status.setVisibility(View.GONE);
         holder.addView(status, sp);
 
         infoPill = pill();
         infoPill.setTextSize(12);
         infoPill.setContentDescription(getString(R.string.cam_info));
-        infoPill.setOnClickListener(v -> CamInfo.show(this));
+        infoPill.setOnClickListener(v -> {
+            if (engine != null && engine.mode() == CameraEngine.VIDEO && !recActive) toggleOptions();
+            else CamInfo.show(this);
+        });
         Ui.press(this, infoPill);
         FrameLayout.LayoutParams ip = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.START);
         ip.topMargin = dp(10);
-        ip.setMarginStart(dp(10));
+        ip.setMarginStart(dp(12));
         infoPill.setVisibility(View.GONE);
         holder.addView(infoPill, ip);
 
@@ -389,7 +392,7 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         Ui.press(this, ratioPill);
         FrameLayout.LayoutParams rp = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.END);
         rp.topMargin = dp(10);
-        rp.setMarginEnd(dp(10));
+        rp.setMarginEnd(dp(12));
         ratioPill.setVisibility(View.GONE);
         holder.addView(ratioPill, rp);
 
@@ -507,14 +510,24 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         levelRow.addView(lvl, new LinearLayout.LayoutParams(-1, -2));
         videoRow = new LinearLayout(this);
         videoRow.setOrientation(LinearLayout.HORIZONTAL);
-        videoRow.setGravity(Gravity.CENTER);
-        videoRow.setVisibility(View.GONE);
-        FrameLayout rowWrap = new FrameLayout(this);
+        videoBox = new LinearLayout(this);
+        videoBox.setOrientation(LinearLayout.VERTICAL);
+        videoBox.setGravity(Gravity.CENTER_HORIZONTAL);
+        videoBox.setVisibility(View.GONE);
+        TextView vlbl = new TextView(this);
+        vlbl.setText(R.string.cam_video_quality);
+        vlbl.setTextSize(12);
+        vlbl.setTextColor(0xB3FFFFFF);
+        vlbl.setGravity(Gravity.CENTER);
+        vlbl.setPadding(0, 0, 0, dp(8));
+        videoBox.addView(vlbl, new LinearLayout.LayoutParams(-1, -2));
+        videoBox.addView(videoRow, new LinearLayout.LayoutParams(-1, -2));
         LinearLayout.LayoutParams lrp = new LinearLayout.LayoutParams(-1, -2);
         lrp.topMargin = dp(10);
         optPanel.addView(levelRow, lrp);
-        rowWrap.addView(videoRow, new FrameLayout.LayoutParams(-2, -2, Gravity.CENTER));
-        bottom.addView(rowWrap, new LinearLayout.LayoutParams(-2, -2));
+        LinearLayout.LayoutParams vrp = new LinearLayout.LayoutParams(-1, -2);
+        vrp.topMargin = dp(10);
+        optPanel.addView(videoBox, vrp);
 
         LinearLayout modes = new LinearLayout(this);
         modes.setOrientation(LinearLayout.HORIZONTAL);
@@ -614,6 +627,12 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         permView.setVisibility(View.GONE);
         root.addView(permView, new FrameLayout.LayoutParams(-1, -1));
 
+        View.OnLayoutChangeListener fl = (v, l, t, r, bt, ol, ot, or2, ob) -> {
+            if (l != ol || t != ot || r != or2 || bt != ob) v.post(this::fitFloating);
+        };
+        holder.addOnLayoutChangeListener(fl);
+        pod.addOnLayoutChangeListener(fl);
+        topBar.addOnLayoutChangeListener(fl);
         refreshTop();
         refreshModeUi();
         topBar.setAlpha(0f);
@@ -1131,7 +1150,10 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
                 engine.bind();
             });
             videoChips.add(ch);
-            videoRow.addView(ch);
+            ch.setGravity(Gravity.CENTER);
+            LinearLayout.LayoutParams vcp = new LinearLayout.LayoutParams(0, -2, 1f);
+            vcp.setMargins(dp(3), 0, dp(3), 0);
+            videoRow.addView(ch, vcp);
         }
     }
 
@@ -1207,7 +1229,7 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         final boolean full = lk == 2;
         final boolean tall = lk == 0;
         boolean overlap = full || tall;
-        int topH = topBar != null && topBar.getHeight() > 0 ? topBar.getHeight() : dp(54);
+        int topH = dp(56) + insetTop;
         int overlapH = full ? dp(250) : tall ? dp(130) : 0;
         int wantBottom = -overlapH;
         int wantTop = (full || tall) ? -topH : 0;
@@ -1225,16 +1247,17 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         int pillTop = full || tall ? topH + dp(10) : dp(10);
         View[] pills = {status, infoPill, ratioPill};
         for (View pv : pills) {
+            int want = pv == status ? pillTop + dp(40) : pillTop;
             FrameLayout.LayoutParams pl = (FrameLayout.LayoutParams) pv.getLayoutParams();
-            if (pl.topMargin != pillTop) {
-                pl.topMargin = pillTop;
+            if (pl.topMargin != want) {
+                pl.topMargin = want;
                 pv.setLayoutParams(pl);
             }
         }
         colView.post(this::fitFloating);
         bottomBar.setBackground(null);
         levelRow.setVisibility(vid ? View.GONE : (m == CameraEngine.NIGHT || m == CameraEngine.DEEP || m == CameraEngine.HDR) ? View.INVISIBLE : View.VISIBLE);
-        videoRow.setVisibility(vid ? View.VISIBLE : View.GONE);
+        videoBox.setVisibility(vid ? View.VISIBLE : View.GONE);
         if (vid && engine != null) rebuildVideoRow();
         proPanel.setVisibility(m == CameraEngine.PRO ? View.VISIBLE : View.GONE);
         shutter.setNight(m == CameraEngine.NIGHT || m == CameraEngine.DEEP);
@@ -1245,12 +1268,12 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
     }
 
     private void fitFloating() {
-        if (holder == null || pod == null || lensRow == null) return;
-        int[] a = new int[2], b = new int[2];
-        holder.getLocationOnScreen(a);
-        pod.getLocationOnScreen(b);
-        int over = a[1] + holder.getHeight() - b[1];
-        int m = dp(10) + Math.max(0, over);
+        if (holder == null || pod == null || lensRow == null || bottomBar == null || colView == null) return;
+        if (holder.getHeight() == 0 || pod.getHeight() == 0) return;
+        int holderBottom = holder.getBottom();
+        int podTop = bottomBar.getTop() + pod.getTop();
+        int over = Math.max(0, holderBottom - podTop);
+        int m = dp(10) + over;
         FrameLayout.LayoutParams zl = (FrameLayout.LayoutParams) lensRow.getLayoutParams();
         if (zl.bottomMargin != m) {
             zl.bottomMargin = m;
@@ -1260,6 +1283,15 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         if (pl.bottomMargin != m + dp(46)) {
             pl.bottomMargin = m + dp(46);
             proPanel.setLayoutParams(pl);
+        }
+        if (grid != null && topBar != null) {
+            int gt = Math.max(0, topBar.getBottom() - holder.getTop());
+            FrameLayout.LayoutParams gl = (FrameLayout.LayoutParams) grid.getLayoutParams();
+            if (gl.topMargin != gt || gl.bottomMargin != over) {
+                gl.topMargin = gt;
+                gl.bottomMargin = over;
+                grid.setLayoutParams(gl);
+            }
         }
     }
 

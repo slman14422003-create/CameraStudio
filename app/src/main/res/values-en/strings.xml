@@ -14,6 +14,7 @@
 
     <string name="cam_flash">Flash</string>
     <string name="cam_grid">Composition grid</string>
+    <string name="cam_video_quality">Video quality</string>
     <string name="cam_processing">Processing</string>
     <string name="cam_processing_now">Enhancing photo…</string>
     <string name="cam_open_gallery">Open Gallery</string>
