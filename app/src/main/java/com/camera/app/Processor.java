@@ -11,6 +11,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -123,7 +124,36 @@ final class Processor {
         }, "cam-processing");
         return t;
     });
+    private static final ExecutorService DECODE = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(() -> {
+            try {
+                android.os.Process.setThreadPriority(8);
+            } catch (Throwable ignored) {
+            }
+            r.run();
+        }, "cam-decode");
+        t.setDaemon(true);
+        return t;
+    });
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
+
+    private static Future<Bitmap> decodeAhead(List<byte[]> frames, int i, int sample) {
+        final byte[] b = frames.get(i);
+        frames.set(i, null);
+        return DECODE.submit(() -> b == null ? null : decode(b, sample));
+    }
+
+    private static Bitmap take(Future<Bitmap> f) {
+        if (f == null) return null;
+        try {
+            return f.get();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return null;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
     private static final AtomicInteger PENDING = new AtomicInteger();
 
     static int pending() {
@@ -224,10 +254,10 @@ final class Processor {
                 final int w = base.getWidth(), h = base.getHeight();
                 handle = Native.mergeBegin(w, h);
                 if (handle == 0 || !Native.mergeAdd(handle, base)) throw new IOException("merge failed");
+                Future<Bitmap> ahead = frames.size() > 1 ? decodeAhead(frames, 1, sample) : null;
                 for (int i = 1; i < frames.size(); i++) {
-                    byte[] b = frames.get(i);
-                    frames.set(i, null);   // let the JPEG bytes go as soon as they are decoded
-                    Bitmap f = b == null ? null : decode(b, sample);
+                    Bitmap f = take(ahead);
+                    ahead = i + 1 < frames.size() ? decodeAhead(frames, i + 1, sample) : null;
                     if (f == null) continue;
                     if (f.getWidth() == w && f.getHeight() == h) Native.mergeAdd(handle, f);
                     f.recycle();

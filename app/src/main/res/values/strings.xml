@@ -159,4 +159,12 @@
     <string name="set_dehaze">إزالة الضباب</string>
     <string name="set_isp">أعلى جودة لمعالج الحساس</string>
     <string name="set_isp_sub">تصحيح العتمة في الزوايا والبكسلات الميتة والتدرجات اللونية؛ التقاط أبطأ قليلاً</string>
+    <string name="set_camera">الكاميرا</string>
+    <string name="set_app">التطبيق</string>
+    <string name="set_fine">ضبط دقيق</string>
+    <string name="set_fine_note">قيم من −2 إلى +2 تُضاف فوق مستوى المعالجة المختار.</string>
+    <string name="set_off">متوقف</string>
+    <string name="set_sec_basics">الأساسيات</string>
+    <string name="set_sec_merge">دمج اللقطات</string>
+    <string name="set_sec_sensor">الحساس</string>
 </resources>

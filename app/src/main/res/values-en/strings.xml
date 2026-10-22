@@ -159,4 +159,12 @@
     <string name="set_dehaze">Dehaze</string>
     <string name="set_isp">Best sensor pipeline quality</string>
     <string name="set_isp_sub">Lens shading, hot pixels and tone map at high quality; the shot takes slightly longer</string>
+    <string name="set_camera">Camera</string>
+    <string name="set_app">App</string>
+    <string name="set_fine">Fine tuning</string>
+    <string name="set_fine_note">Values from −2 to +2 are added on top of the chosen processing level.</string>
+    <string name="set_off">Off</string>
+    <string name="set_sec_basics">Basics</string>
+    <string name="set_sec_merge">Frame merging</string>
+    <string name="set_sec_sensor">Sensor</string>
 </resources>

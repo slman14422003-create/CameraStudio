@@ -2,7 +2,6 @@ package com.camera.app;
 
 import android.app.Activity;
 import android.app.Application;
-import android.os.Build;
 import android.os.Bundle;
 import android.view.View;
 
@@ -10,10 +9,7 @@ import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
 
-/**
- * Android 15+ (and every app targeting API 35/36) draws edge-to-edge and the old opt-out is gone on
- * Android 16. This keeps every screen clear of the status bar, navigation bar, cutout and keyboard.
- */
+/** Every screen is edge-to-edge with the status bar hidden; this keeps content clear of the cutout, navigation bar and keyboard. */
 public class App extends Application {
     @Override
     public void onCreate() {
@@ -26,13 +22,12 @@ public class App extends Application {
 
             @Override
             public void onActivityStarted(Activity a) {
-                if (Build.VERSION.SDK_INT < 35) return;
+                if (a instanceof CameraActivity) return;
                 View content = a.findViewById(android.R.id.content);
                 if (content == null || content.getTag(R.id.tag_insets) != null) return;
                 content.setTag(R.id.tag_insets, Boolean.TRUE);
                 ViewCompat.setOnApplyWindowInsetsListener(content, (v, insets) -> {
-                    Insets b = insets.getInsets(WindowInsetsCompat.Type.systemBars()
-                            | WindowInsetsCompat.Type.displayCutout() | WindowInsetsCompat.Type.ime());
+                    Insets b = Bars.safe(a, insets);
                     v.setPadding(b.left, b.top, b.right, b.bottom);
                     return WindowInsetsCompat.CONSUMED;
                 });

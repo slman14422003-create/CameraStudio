@@ -2,15 +2,132 @@
 <animated-vector xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:aapt="http://schemas.android.com/aapt"
     android:drawable="@drawable/ic_splash_folder">
+    <target android:name="tile">
+        <aapt:attr name="android:animation">
+            <set android:ordering="together">
+                <objectAnimator android:duration="420" android:interpolator="@android:interpolator/overshoot" android:propertyName="scaleX" android:valueFrom="0.35" android:valueTo="1" android:valueType="floatType" />
+                <objectAnimator android:duration="420" android:interpolator="@android:interpolator/overshoot" android:propertyName="scaleY" android:valueFrom="0.35" android:valueTo="1" android:valueType="floatType" />
+            </set>
+        </aapt:attr>
+    </target>
+    <target android:name="shadow">
+        <aapt:attr name="android:animation">
+            <set android:ordering="together">
+                <objectAnimator android:duration="580" android:valueType="floatType">
+                    <propertyValuesHolder android:propertyName="scaleX">
+                        <keyframe android:fraction="0" android:value="0" />
+                        <keyframe android:fraction="0.2759" android:value="0" />
+                        <keyframe android:fraction="1" android:value="1" android:interpolator="@android:interpolator/decelerate_cubic" />
+                    </propertyValuesHolder>
+                </objectAnimator>
+                <objectAnimator android:duration="580" android:valueType="floatType">
+                    <propertyValuesHolder android:propertyName="scaleY">
+                        <keyframe android:fraction="0" android:value="0" />
+                        <keyframe android:fraction="0.2759" android:value="0" />
+                        <keyframe android:fraction="1" android:value="1" android:interpolator="@android:interpolator/decelerate_cubic" />
+                    </propertyValuesHolder>
+                </objectAnimator>
+            </set>
+        </aapt:attr>
+    </target>
+    <target android:name="body">
+        <aapt:attr name="android:animation">
+            <set android:ordering="together">
+                <objectAnimator android:duration="580" android:valueType="floatType">
+                    <propertyValuesHolder android:propertyName="scaleX">
+                        <keyframe android:fraction="0" android:value="0.2" />
+                        <keyframe android:fraction="0.2069" android:value="0.2" />
+                        <keyframe android:fraction="1" android:value="1" android:interpolator="@android:interpolator/overshoot" />
+                    </propertyValuesHolder>
+                </objectAnimator>
+                <objectAnimator android:duration="580" android:valueType="floatType">
+                    <propertyValuesHolder android:propertyName="scaleY">
+                        <keyframe android:fraction="0" android:value="0.2" />
+                        <keyframe android:fraction="0.2069" android:value="0.2" />
+                        <keyframe android:fraction="1" android:value="1" android:interpolator="@android:interpolator/overshoot" />
+                    </propertyValuesHolder>
+                </objectAnimator>
+                <objectAnimator android:duration="480" android:valueType="floatType">
+                    <propertyValuesHolder android:propertyName="translateY">
+                        <keyframe android:fraction="0" android:value="6" />
+                        <keyframe android:fraction="0.2500" android:value="6" />
+                        <keyframe android:fraction="1" android:value="0" android:interpolator="@android:interpolator/fast_out_slow_in" />
+                    </propertyValuesHolder>
+                </objectAnimator>
+            </set>
+        </aapt:attr>
+    </target>
     <target android:name="lens">
         <aapt:attr name="android:animation">
             <set android:ordering="together">
-                <objectAnimator android:duration="520" android:interpolator="@android:interpolator/overshoot"
-                    android:propertyName="scaleX" android:valueFrom="0.55" android:valueTo="1" android:valueType="floatType" />
-                <objectAnimator android:duration="520" android:interpolator="@android:interpolator/overshoot"
-                    android:propertyName="scaleY" android:valueFrom="0.55" android:valueTo="1" android:valueType="floatType" />
-                <objectAnimator android:duration="900" android:interpolator="@android:interpolator/fast_out_slow_in"
-                    android:propertyName="rotation" android:valueFrom="-60" android:valueTo="0" android:valueType="floatType" />
+                <objectAnimator android:duration="780" android:valueType="floatType">
+                    <propertyValuesHolder android:propertyName="scaleX">
+                        <keyframe android:fraction="0" android:value="0" />
+                        <keyframe android:fraction="0.3333" android:value="0" />
+                        <keyframe android:fraction="1" android:value="1" android:interpolator="@android:interpolator/overshoot" />
+                    </propertyValuesHolder>
+                </objectAnimator>
+                <objectAnimator android:duration="780" android:valueType="floatType">
+                    <propertyValuesHolder android:propertyName="scaleY">
+                        <keyframe android:fraction="0" android:value="0" />
+                        <keyframe android:fraction="0.3333" android:value="0" />
+                        <keyframe android:fraction="1" android:value="1" android:interpolator="@android:interpolator/overshoot" />
+                    </propertyValuesHolder>
+                </objectAnimator>
+                <objectAnimator android:duration="960" android:valueType="floatType">
+                    <propertyValuesHolder android:propertyName="rotation">
+                        <keyframe android:fraction="0" android:value="-120" />
+                        <keyframe android:fraction="0.2708" android:value="-120" />
+                        <keyframe android:fraction="1" android:value="0" android:interpolator="@android:interpolator/fast_out_slow_in" />
+                    </propertyValuesHolder>
+                </objectAnimator>
+            </set>
+        </aapt:attr>
+    </target>
+    <target android:name="shine">
+        <aapt:attr name="android:animation">
+            <set android:ordering="together">
+                <objectAnimator android:duration="940" android:valueType="floatType">
+                    <propertyValuesHolder android:propertyName="scaleX">
+                        <keyframe android:fraction="0" android:value="0" />
+                        <keyframe android:fraction="0.5532" android:value="0" />
+                        <keyframe android:fraction="1" android:value="1" android:interpolator="@android:interpolator/fast_out_slow_in" />
+                    </propertyValuesHolder>
+                </objectAnimator>
+                <objectAnimator android:duration="940" android:valueType="floatType">
+                    <propertyValuesHolder android:propertyName="scaleY">
+                        <keyframe android:fraction="0" android:value="0" />
+                        <keyframe android:fraction="0.5532" android:value="0" />
+                        <keyframe android:fraction="1" android:value="1" android:interpolator="@android:interpolator/fast_out_slow_in" />
+                    </propertyValuesHolder>
+                </objectAnimator>
+                <objectAnimator android:duration="940" android:valueType="floatType">
+                    <propertyValuesHolder android:propertyName="rotation">
+                        <keyframe android:fraction="0" android:value="-40" />
+                        <keyframe android:fraction="0.5532" android:value="-40" />
+                        <keyframe android:fraction="1" android:value="0" android:interpolator="@android:interpolator/fast_out_slow_in" />
+                    </propertyValuesHolder>
+                </objectAnimator>
+            </set>
+        </aapt:attr>
+    </target>
+    <target android:name="dot">
+        <aapt:attr name="android:animation">
+            <set android:ordering="together">
+                <objectAnimator android:duration="980" android:valueType="floatType">
+                    <propertyValuesHolder android:propertyName="scaleX">
+                        <keyframe android:fraction="0" android:value="0" />
+                        <keyframe android:fraction="0.6531" android:value="0" />
+                        <keyframe android:fraction="1" android:value="1" android:interpolator="@android:interpolator/overshoot" />
+                    </propertyValuesHolder>
+                </objectAnimator>
+                <objectAnimator android:duration="980" android:valueType="floatType">
+                    <propertyValuesHolder android:propertyName="scaleY">
+                        <keyframe android:fraction="0" android:value="0" />
+                        <keyframe android:fraction="0.6531" android:value="0" />
+                        <keyframe android:fraction="1" android:value="1" android:interpolator="@android:interpolator/overshoot" />
+                    </propertyValuesHolder>
+                </objectAnimator>
             </set>
         </aapt:attr>
     </target>

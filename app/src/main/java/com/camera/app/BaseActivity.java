@@ -15,6 +15,12 @@ public abstract class BaseActivity extends AppCompatActivity {
     }
 
     @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        Bars.edgeToEdge(this);
+    }
+
+    @Override
     protected void onPostCreate(Bundle savedInstanceState) {
         super.onPostCreate(savedInstanceState);
         try {
@@ -24,5 +30,18 @@ public abstract class BaseActivity extends AppCompatActivity {
             c.setAppearanceLightNavigationBars(light);
         } catch (Throwable ignored) {
         }
+        Bars.hideStatus(this);
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        Bars.hideStatus(this);
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) Bars.hideStatus(this);
     }
 }

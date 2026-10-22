@@ -39,7 +39,14 @@ public class Dlg extends AlertDialog.Builder {
     public AlertDialog create() {
         final AlertDialog d = super.create();
         dlg = d;
-        d.setOnShowListener(dialog -> style(d));
+        try {
+            d.getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
+        } catch (Throwable ignored) {
+        }
+        d.setOnShowListener(dialog -> {
+            style(d);
+            Bars.hideStatus(d.getWindow());
+        });
         return d;
     }
 

@@ -6,11 +6,20 @@ import android.os.Bundle;
 import android.provider.Settings;
 import android.view.View;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
+
+import androidx.activity.OnBackPressedCallback;
 
 /** Photo quality, processing, appearance, language and the other Semo apps. */
 public class SettingsActivity extends BaseActivity {
+    private static final int MAIN = 0, PHOTO = 1, PROC = 2, DEEP = 3, VIDEO = 4;
+
     private LinearLayout content;
+    private ScrollView scroll;
+    private TextView titleView, subView;
+    private OnBackPressedCallback backCb;
+    private int page = MAIN;
 
     private static final int BLUE = 0xFF007AFF, INDIGO = 0xFF5856D6, PURPLE = 0xFFAF52DE, GREEN = 0xFF34C759,
             ORANGE = 0xFFFF9500, GRAY = 0xFF8E8E93, TEAL = 0xFF30B0C7, PINK = 0xFFFF2D55;
@@ -21,12 +30,23 @@ public class SettingsActivity extends BaseActivity {
         Motion.install(this, R.anim.act_open_enter, R.anim.hold, R.anim.hold, R.anim.act_close_exit);
         setContentView(R.layout.activity_detail);
         useGroupedBackground();
-        ((TextView) findViewById(R.id.title)).setText(R.string.settings);
-        ((TextView) findViewById(R.id.subtitle)).setText(R.string.settings_sub);
-        findViewById(R.id.btnBack).setOnClickListener(v -> finish());
+        titleView = findViewById(R.id.title);
+        subView = findViewById(R.id.subtitle);
+        backCb = new OnBackPressedCallback(false) {
+            @Override
+            public void handleOnBackPressed() {
+                go(MAIN);
+            }
+        };
+        getOnBackPressedDispatcher().addCallback(this, backCb);
+        findViewById(R.id.btnBack).setOnClickListener(v -> {
+            if (page != MAIN) go(MAIN);
+            else finish();
+        });
         View refresh = findViewById(R.id.btnRefresh);
         if (refresh != null) refresh.setVisibility(View.GONE);
         content = findViewById(R.id.content);
+        scroll = (ScrollView) content.getParent();
         Ui.autoGroup(this, content);
     }
 
@@ -48,67 +68,68 @@ public class SettingsActivity extends BaseActivity {
 
     private void render() {
         content.removeAllViews();
+        titleView.setText(pageTitle());
+        subView.setText(page == MAIN ? getString(R.string.settings_sub) : getString(R.string.settings));
+        switch (page) {
+            case PHOTO:
+                renderPhoto();
+                break;
+            case PROC:
+                renderProc();
+                break;
+            case DEEP:
+                renderDeep();
+                break;
+            case VIDEO:
+                renderVideo();
+                break;
+            default:
+                renderMain();
+                break;
+        }
+    }
+
+    private String pageTitle() {
+        switch (page) {
+            case PHOTO: return getString(R.string.set_quality);
+            case PROC: return getString(R.string.set_proc);
+            case DEEP: return getString(R.string.set_deep);
+            case VIDEO: return getString(R.string.set_video);
+            default: return getString(R.string.settings);
+        }
+    }
+
+    private void go(int target) {
+        boolean forward = target != MAIN;
+        page = target;
+        backCb.setEnabled(target != MAIN);
+        render();
+        scroll.scrollTo(0, 0);
+        boolean rtl = getResources().getConfiguration().getLayoutDirection() == View.LAYOUT_DIRECTION_RTL;
+        float dx = Ui.dp(this, 36) * (forward ? 1 : -1) * (rtl ? -1 : 1);
+        content.animate().cancel();
+        content.setTranslationX(dx);
+        content.setAlpha(0f);
+        content.animate().translationX(0f).alpha(1f).setDuration(300).setInterpolator(Motion.OUT).withLayer().start();
+    }
+
+    private View navRow(int icon, int tint, int title, String sub, final int target) {
+        return Ui.rowView(this, content, new Row(icon, false, getString(title), sub, false, true).tint(tint), v -> go(target));
+    }
+
+    private void renderMain() {
         content.addView(Ui.hero(this, getString(R.string.app_name), getString(R.string.set_version, BuildConfig.VERSION_NAME)));
 
-        content.addView(Ui.sectionTitle(this, getString(R.string.set_quality)));
-        content.addView(Ui.rowView(this, content, new Row(R.drawable.ic_wand, false,
-                getString(R.string.set_level), levelName(), false, true).tint(BLUE), v -> pickLevel()));
-        content.addView(Ui.rowView(this, content, new Row(R.drawable.ic_moon, false,
-                getString(R.string.set_night_frames),
-                getString(R.string.set_frames_n, Store.num(this, "night_frames", 6)), false, true).tint(INDIGO),
-                v -> pickFrames()));
-        content.addView(Ui.rowView(this, content, new Row(R.drawable.ic_image, false,
-                getString(R.string.set_jpeg), Store.num(this, "jpeg_q", 100) + "%", false, true).tint(ORANGE),
-                v -> pickJpeg()));
-        Ui.Toggle hi = Ui.toggle(this, content, R.string.set_multi, R.string.set_multi_sub,
-                Store.bool(this, "multi_photo", true), R.drawable.ic_aspect, PINK);
-        hi.onChange((b, on) -> Store.setBool(this, "multi_photo", on));
-        content.addView(hi.view);
-        content.addView(Ui.footer(this, getString(R.string.set_quality_note)));
-
-        content.addView(Ui.sectionTitle(this, getString(R.string.set_proc)));
-        content.addView(Ui.rowView(this, content, new Row(R.drawable.ic_adjust, false,
-                getString(R.string.set_style), getString(styleName(Store.num(this, "pstyle", 0))), false, true).tint(PINK),
-                v -> pickStyle()));
-        addTrimRow("trim_den", R.string.set_trim_den, ORANGE);
-        addTrimRow("trim_sharp", R.string.set_trim_sharp, TEAL);
-        addTrimRow("trim_tone", R.string.set_trim_tone, BLUE);
-        addTrimRow("trim_color", R.string.set_trim_color, PINK);
-        content.addView(Ui.rowView(this, content, new Row(R.drawable.ic_adjust, false,
-                getString(R.string.set_dehaze), String.valueOf(Store.num(this, "dehaze", 0)), false, true).tint(ORANGE),
-                v -> pickDehaze()));
-        Ui.Toggle ispT = Ui.toggle(this, content, R.string.set_isp, R.string.set_isp_sub,
-                Store.bool(this, "isp_hq", true), R.drawable.ic_camera, GREEN);
-        ispT.onChange((b4, on) -> Store.setBool(this, "isp_hq", on));
-        content.addView(ispT.view);
-
-        content.addView(Ui.sectionTitle(this, getString(R.string.set_deep)));
-        Ui.Toggle deepT = Ui.toggle(this, content, R.string.set_deep, R.string.set_deep_sub,
-                Store.bool(this, "deep_on", false), R.drawable.ic_camera, TEAL);
-        deepT.onChange((b3, on) -> Store.setBool(this, "deep_on", on));
-        content.addView(deepT.view);
-        content.addView(Ui.rowView(this, content, new Row(R.drawable.ic_speed, false,
-                getString(R.string.set_deep_time), getString(R.string.deep_secs, Store.num(this, "deep_secs", 15)), false, true).tint(ORANGE),
-                v -> pickDeepTime()));
-        content.addView(Ui.rowView(this, content, new Row(R.drawable.ic_aspect, false,
-                getString(R.string.set_deep_res), getString(Store.num(this, "deep_res", 0) == 1 ? R.string.deep_res_50 : R.string.deep_res_12), false, true).tint(PINK),
-                v -> pickDeepRes()));
-
-        content.addView(Ui.sectionTitle(this, getString(R.string.set_video)));
-        content.addView(Ui.rowView(this, content, new Row(R.drawable.ic_adjust, false,
-                getString(R.string.set_vfx), getString(vfxName(Store.num(this, "vfx", 0))), false, true).tint(PINK),
-                v -> pickVfx()));
-        Ui.Toggle vs = Ui.toggle(this, content, R.string.set_vstab, R.string.set_vstab_sub,
-                Store.bool(this, "vstab", true), R.drawable.ic_focus, GREEN);
-        vs.onChange((bt, on) -> Store.setBool(this, "vstab", on));
-        content.addView(vs.view);
-        Ui.Toggle va = Ui.toggle(this, content, R.string.set_vaudio, R.string.set_vaudio_sub,
-                Store.bool(this, "vaudio", true), R.drawable.ic_speed, ORANGE);
-        va.onChange((bt, on) -> Store.setBool(this, "vaudio", on));
-        content.addView(va.view);
-        content.addView(Ui.rowView(this, content, new Row(R.drawable.ic_camera, false,
-                getString(R.string.set_cam_info), getString(R.string.set_cam_info_sub), false, true).tint(BLUE),
-                v -> CamInfo.show(this)));
+        content.addView(Ui.sectionTitle(this, getString(R.string.set_camera)));
+        content.addView(navRow(R.drawable.ic_image, BLUE, R.string.set_quality,
+                levelName() + " · " + Store.num(this, "jpeg_q", 100) + "%", PHOTO));
+        content.addView(navRow(R.drawable.ic_wand, PURPLE, R.string.set_proc,
+                getString(styleName(Store.num(this, "pstyle", 0))), PROC));
+        content.addView(navRow(R.drawable.ic_moon, INDIGO, R.string.set_deep,
+                Store.bool(this, "deep_on", false) ? getString(R.string.deep_secs, Store.num(this, "deep_secs", 15))
+                        : getString(R.string.set_off), DEEP));
+        content.addView(navRow(R.drawable.ic_speed, ORANGE, R.string.set_video,
+                getString(vfxName(Store.num(this, "vfx", 0))), VIDEO));
 
         content.addView(Ui.sectionTitle(this, getString(R.string.set_view)));
         Ui.Toggle gr = Ui.toggle(this, content, R.string.cam_grid, 0, Store.bool(this, "grid", true),
@@ -120,17 +141,15 @@ public class SettingsActivity extends BaseActivity {
         ll.onChange((b2, on) -> Store.setBool(this, "level_line", on));
         content.addView(ll.view);
 
-        content.addView(Ui.sectionTitle(this, getString(R.string.theme_title)));
+        content.addView(Ui.sectionTitle(this, getString(R.string.set_app)));
         content.addView(Ui.rowView(this, content, new Row(R.drawable.ic_palette, true,
                 getString(R.string.theme_title), getString(Appearance.modeName(Store.themeMode(this))), false, true)
                 .tint(INDIGO), v -> pickMode()));
-        content.addView(Ui.footer(this, getString(R.string.theme_mode_note)));
-
-        content.addView(Ui.sectionTitle(this, getString(R.string.set_general)));
         content.addView(Ui.rowView(this, content, new Row(R.drawable.ic_language, false,
                 getString(R.string.set_language), languageName(), false, true).tint(BLUE), v -> pickLanguage()));
         content.addView(Ui.rowView(this, content, new Row(R.drawable.ic_shield, false,
                 getString(R.string.set_permissions), null, false, true).tint(GREEN), v -> openAppSettings()));
+        content.addView(Ui.footer(this, getString(R.string.theme_mode_note)));
 
         content.addView(Ui.sectionTitle(this, getString(R.string.eco_title)));
         LinearLayout eco = new LinearLayout(this);
@@ -152,6 +171,83 @@ public class SettingsActivity extends BaseActivity {
                 getString(R.string.app_name), getString(R.string.set_version, BuildConfig.VERSION_NAME),
                 false, false).tint(GRAY), null));
         content.addView(Ui.footer(this, getString(R.string.about_text)));
+    }
+
+    private void renderPhoto() {
+        content.addView(Ui.sectionTitle(this, getString(R.string.set_sec_basics)));
+        content.addView(Ui.rowView(this, content, new Row(R.drawable.ic_wand, false,
+                getString(R.string.set_level), levelName(), false, true).tint(BLUE), v -> pickLevel()));
+        content.addView(Ui.rowView(this, content, new Row(R.drawable.ic_image, false,
+                getString(R.string.set_jpeg), Store.num(this, "jpeg_q", 100) + "%", false, true).tint(ORANGE),
+                v -> pickJpeg()));
+        content.addView(Ui.footer(this, getString(R.string.set_quality_note)));
+
+        content.addView(Ui.sectionTitle(this, getString(R.string.set_sec_merge)));
+        Ui.Toggle hi = Ui.toggle(this, content, R.string.set_multi, R.string.set_multi_sub,
+                Store.bool(this, "multi_photo", true), R.drawable.ic_aspect, PINK);
+        hi.onChange((b, on) -> Store.setBool(this, "multi_photo", on));
+        content.addView(hi.view);
+        content.addView(Ui.rowView(this, content, new Row(R.drawable.ic_moon, false,
+                getString(R.string.set_night_frames),
+                getString(R.string.set_frames_n, Store.num(this, "night_frames", 6)), false, true).tint(INDIGO),
+                v -> pickFrames()));
+
+        content.addView(Ui.sectionTitle(this, getString(R.string.set_sec_sensor)));
+        Ui.Toggle ispT = Ui.toggle(this, content, R.string.set_isp, R.string.set_isp_sub,
+                Store.bool(this, "isp_hq", true), R.drawable.ic_camera, GREEN);
+        ispT.onChange((b4, on) -> Store.setBool(this, "isp_hq", on));
+        content.addView(ispT.view);
+    }
+
+    private void renderProc() {
+        content.addView(Ui.sectionTitle(this, getString(R.string.set_style)));
+        content.addView(Ui.rowView(this, content, new Row(R.drawable.ic_adjust, false,
+                getString(R.string.set_style), getString(styleName(Store.num(this, "pstyle", 0))), false, true).tint(PINK),
+                v -> pickStyle()));
+
+        content.addView(Ui.sectionTitle(this, getString(R.string.set_fine)));
+        addTrimRow("trim_den", R.string.set_trim_den, ORANGE);
+        addTrimRow("trim_sharp", R.string.set_trim_sharp, TEAL);
+        addTrimRow("trim_tone", R.string.set_trim_tone, BLUE);
+        addTrimRow("trim_color", R.string.set_trim_color, PINK);
+        content.addView(Ui.rowView(this, content, new Row(R.drawable.ic_adjust, false,
+                getString(R.string.set_dehaze), String.valueOf(Store.num(this, "dehaze", 0)), false, true).tint(ORANGE),
+                v -> pickDehaze()));
+        content.addView(Ui.footer(this, getString(R.string.set_fine_note)));
+    }
+
+    private void renderDeep() {
+        content.addView(Ui.sectionTitle(this, getString(R.string.set_deep)));
+        Ui.Toggle deepT = Ui.toggle(this, content, R.string.set_deep, R.string.set_deep_sub,
+                Store.bool(this, "deep_on", false), R.drawable.ic_camera, TEAL);
+        deepT.onChange((b3, on) -> Store.setBool(this, "deep_on", on));
+        content.addView(deepT.view);
+        content.addView(Ui.rowView(this, content, new Row(R.drawable.ic_speed, false,
+                getString(R.string.set_deep_time), getString(R.string.deep_secs, Store.num(this, "deep_secs", 15)), false, true).tint(ORANGE),
+                v -> pickDeepTime()));
+        content.addView(Ui.rowView(this, content, new Row(R.drawable.ic_aspect, false,
+                getString(R.string.set_deep_res), getString(Store.num(this, "deep_res", 0) == 1 ? R.string.deep_res_50 : R.string.deep_res_12), false, true).tint(PINK),
+                v -> pickDeepRes()));
+    }
+
+    private void renderVideo() {
+        content.addView(Ui.sectionTitle(this, getString(R.string.set_video)));
+        content.addView(Ui.rowView(this, content, new Row(R.drawable.ic_adjust, false,
+                getString(R.string.set_vfx), getString(vfxName(Store.num(this, "vfx", 0))), false, true).tint(PINK),
+                v -> pickVfx()));
+        Ui.Toggle vs = Ui.toggle(this, content, R.string.set_vstab, R.string.set_vstab_sub,
+                Store.bool(this, "vstab", true), R.drawable.ic_focus, GREEN);
+        vs.onChange((bt, on) -> Store.setBool(this, "vstab", on));
+        content.addView(vs.view);
+        Ui.Toggle va = Ui.toggle(this, content, R.string.set_vaudio, R.string.set_vaudio_sub,
+                Store.bool(this, "vaudio", true), R.drawable.ic_speed, ORANGE);
+        va.onChange((bt, on) -> Store.setBool(this, "vaudio", on));
+        content.addView(va.view);
+
+        content.addView(Ui.sectionTitle(this, getString(R.string.set_cam_info)));
+        content.addView(Ui.rowView(this, content, new Row(R.drawable.ic_camera, false,
+                getString(R.string.set_cam_info), getString(R.string.set_cam_info_sub), false, true).tint(BLUE),
+                v -> CamInfo.show(this)));
     }
 
     private String languageName() {

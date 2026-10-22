@@ -1,6 +1,7 @@
 #include "image_processing.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstring>
 #include <vector>
@@ -13,23 +14,29 @@ namespace {
 inline int clampi(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
 inline float clampf(float v, float lo, float hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
-// Runs f(begin, end) over [0, n) on all cores (rows / tiles are independent).
+// Runs f(begin, end) over [0, n): small chunks are handed out dynamically, so fast cores take more work
 template <typename F>
 void parallelFor(int n, F f) {
-    int threads = (int) std::thread::hardware_concurrency();
-    threads = clampi(threads, 2, 8);
+    static const int hw = (int) std::thread::hardware_concurrency();
+    int threads = clampi(hw, 2, 8);
     if (n < threads * 4) threads = 1;
     if (threads == 1) {
         f(0, n);
         return;
     }
+    const int chunk = std::max(1, (n + threads * 4 - 1) / (threads * 4));
+    std::atomic<int> next(0);
+    auto work = [&]() {
+        for (;;) {
+            int a = next.fetch_add(chunk);
+            if (a >= n) break;
+            f(a, std::min(n, a + chunk));
+        }
+    };
     std::vector<std::thread> pool;
-    int chunk = (n + threads - 1) / threads;
-    for (int t = 0; t < threads; t++) {
-        int a = t * chunk, b = std::min(n, a + chunk);
-        if (a >= b) break;
-        pool.emplace_back([=]() { f(a, b); });
-    }
+    pool.reserve(threads - 1);
+    for (int t = 1; t < threads; t++) pool.emplace_back(work);
+    work();
     for (auto& th : pool) th.join();
 }
 

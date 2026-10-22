@@ -4,6 +4,9 @@ import android.app.Activity;
 import android.os.Build;
 
 final class Motion {
+    static final android.view.animation.Interpolator OUT = new android.view.animation.PathInterpolator(0.22f, 1f, 0.36f, 1f);
+    static final android.view.animation.Interpolator IN = new android.view.animation.PathInterpolator(0.4f, 0f, 0.9f, 0.5f);
+
     private Motion() {
     }
 

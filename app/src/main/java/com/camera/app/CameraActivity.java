@@ -252,8 +252,9 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         root.addView(col, new FrameLayout.LayoutParams(-1, -1));
         colView = col;
         root.setOnApplyWindowInsetsListener((v, ins) -> {
-            insetTop = ins.getSystemWindowInsetTop();
-            insetBottom = ins.getSystemWindowInsetBottom();
+            androidx.core.graphics.Insets sf = Bars.safe(this, androidx.core.view.WindowInsetsCompat.toWindowInsetsCompat(ins, v));
+            insetTop = Math.max(sf.top, dp(8));
+            insetBottom = sf.bottom;
             if (topBar != null) topBar.setPadding(dp(12), dp(6) + insetTop, dp(12), dp(6));
             if (pod != null) {
                 LinearLayout.LayoutParams pp2 = (LinearLayout.LayoutParams) pod.getLayoutParams();
@@ -640,10 +641,10 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         pod.setAlpha(0f);
         pod.setTranslationY(dp(60));
         root.post(() -> {
-            topBar.animate().alpha(1f).translationY(0f).setStartDelay(120).setDuration(420)
-                    .setInterpolator(new android.view.animation.DecelerateInterpolator(1.8f)).start();
-            pod.animate().alpha(1f).translationY(0f).setStartDelay(200).setDuration(480)
-                    .setInterpolator(new android.view.animation.DecelerateInterpolator(1.8f)).start();
+            topBar.animate().alpha(1f).translationY(0f).setStartDelay(120).setDuration(480)
+                    .setInterpolator(Motion.OUT).withLayer().start();
+            pod.animate().alpha(1f).translationY(0f).setStartDelay(200).setDuration(540)
+                    .setInterpolator(Motion.OUT).withLayer().start();
         });
     }
 
@@ -1194,7 +1195,7 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         if (lastHl != -1 && lastHl != hl0 && modeScroll != null) {
             android.transition.AutoTransition at = new android.transition.AutoTransition();
             at.setDuration(240);
-            at.setInterpolator(new android.view.animation.DecelerateInterpolator(1.4f));
+            at.setInterpolator(Motion.OUT);
             android.transition.TransitionManager.beginDelayedTransition(modeScroll, at);
         }
         lastHl = hl0;
@@ -1343,11 +1344,12 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
             optPanel.setTranslationY(-dp(14));
             optPanel.setScaleX(0.96f);
             optPanel.setVisibility(View.VISIBLE);
-            optPanel.animate().alpha(1f).translationY(0f).scaleX(1f).setDuration(260)
-                    .setInterpolator(new android.view.animation.DecelerateInterpolator(1.6f)).start();
+            optPanel.animate().alpha(1f).translationY(0f).scaleX(1f).setDuration(300)
+                    .setInterpolator(Motion.OUT).withLayer().start();
             for (View v : pl) v.animate().alpha(0f).setDuration(160).start();
         } else {
             optPanel.animate().alpha(0f).translationY(-dp(10)).setDuration(180)
+                    .setInterpolator(Motion.IN).withLayer()
                     .withEndAction(() -> {
                         if (!optOpen) optPanel.setVisibility(View.GONE);
                     }).start();
@@ -1732,37 +1734,42 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
 
     private void hdrCapture() {
         if (!hdrRunning) return;
+        final boolean first = hdrFrames != null && hdrFrames.isEmpty();
         engine.capture(new ImageCapture.OnImageCapturedCallback() {
             @Override
             public void onCaptureSuccess(ImageProxy image) {
-                byte[] b = jpegBytes(image);
-                int rot = image.getImageInfo().getRotationDegrees();
+                final byte[] b = jpegBytes(image);
+                final int rot = image.getImageInfo().getRotationDegrees();
                 image.close();
-                if (!hdrRunning || hdrFrames == null) return;
-                if (b != null) {
-                    if (hdrFrames.isEmpty()) {
-                        hdrRot = rot;
-                        float[] st = Processor.exposureStats(b);
-                        if (st != null) {
-                            float under = st[0] > 0.10f ? 3f : st[0] > 0.02f ? 2f : st[0] > 0.004f ? 1.5f : 1f;
-                            float over = st[1] > 0.25f ? 3f : st[1] > 0.08f ? 2f : st[1] > 0.02f ? 1.5f : 1f;
-                            hdrStops[1] = -under;
-                            hdrStops[2] = over;
+                final float[] st = first && b != null ? Processor.exposureStats(b) : null;
+                runOnUiThread(() -> {
+                    if (!hdrRunning || hdrFrames == null) return;
+                    if (b != null) {
+                        if (hdrFrames.isEmpty()) {
+                            hdrRot = rot;
+                            if (st != null) {
+                                float under = st[0] > 0.10f ? 3f : st[0] > 0.02f ? 2f : st[0] > 0.004f ? 1.5f : 1f;
+                                float over = st[1] > 0.25f ? 3f : st[1] > 0.08f ? 2f : st[1] > 0.02f ? 1.5f : 1f;
+                                hdrStops[1] = -under;
+                                hdrStops[2] = over;
+                            }
+                            hdrSteps[1] = engine.evFrom(hdrPrevEv, hdrStops[1]);
+                            hdrSteps[2] = engine.evFrom(hdrPrevEv, hdrStops[2]);
                         }
-                        hdrSteps[1] = engine.evFrom(hdrPrevEv, hdrStops[1]);
-                        hdrSteps[2] = engine.evFrom(hdrPrevEv, hdrStops[2]);
+                        hdrFrames.add(b);
                     }
-                    hdrFrames.add(b);
-                }
-                hdrIdx++;
-                hand.post(CameraActivity.this::hdrNext);
+                    hdrIdx++;
+                    hdrNext();
+                });
             }
 
             @Override
             public void onError(ImageCaptureException e) {
-                if (!hdrRunning) return;
-                hdrIdx++;
-                hand.post(CameraActivity.this::hdrNext);
+                runOnUiThread(() -> {
+                    if (!hdrRunning) return;
+                    hdrIdx++;
+                    hdrNext();
+                });
             }
         });
     }
@@ -1838,23 +1845,27 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         engine.capture(new ImageCapture.OnImageCapturedCallback() {
             @Override
             public void onCaptureSuccess(ImageProxy image) {
-                byte[] b = jpegBytes(image);
-                int rot = image.getImageInfo().getRotationDegrees();
+                final byte[] b = jpegBytes(image);
+                final int rot = image.getImageInfo().getRotationDegrees();
                 image.close();
-                if (b == null || deep == null) {
-                    deepErrors++;
-                } else {
-                    if (deepFrames == 0) deep.rotation = rot;
-                    Processor.deepAdd(deep, b);
-                    deepFrames++;
-                }
-                hand.post(CameraActivity.this::deepNext);
+                runOnUiThread(() -> {
+                    if (b == null || deep == null) {
+                        deepErrors++;
+                    } else {
+                        if (deepFrames == 0) deep.rotation = rot;
+                        Processor.deepAdd(deep, b);
+                        deepFrames++;
+                    }
+                    deepNext();
+                });
             }
 
             @Override
             public void onError(ImageCaptureException e) {
-                deepErrors++;
-                hand.postDelayed(CameraActivity.this::deepNext, 150);
+                runOnUiThread(() -> {
+                    deepErrors++;
+                    hand.postDelayed(CameraActivity.this::deepNext, 150);
+                });
             }
         });
     }
@@ -1897,6 +1908,7 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
             busy = true;
             shutter.setBusy(true);
             flashEffect();
+            engine.lockBurst(true);
             nextFrame(0, frames, new ArrayList<>(), new int[]{0});
             return;
         }
@@ -1911,26 +1923,30 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         engine.capture(new ImageCapture.OnImageCapturedCallback() {
             @Override
             public void onCaptureSuccess(ImageProxy image) {
-                byte[] b = jpegBytes(image);
-                int rot = image.getImageInfo().getRotationDegrees();
+                final byte[] b = jpegBytes(image);
+                final int rot = image.getImageInfo().getRotationDegrees();
                 image.close();
-                busy = false;
-                shutter.setBusy(false);
-                if (b == null) {
-                    Toast.makeText(CameraActivity.this, R.string.cam_error, Toast.LENGTH_SHORT).show();
-                    return;
-                }
-                Processor.zoom = engine.zoom() * engine.lensFactor();
-                Processor.portrait = sub == 8;
-                Processor.shot(CameraActivity.this, b, rot, level, quality(), done);
-                updateStatus();
+                runOnUiThread(() -> {
+                    busy = false;
+                    shutter.setBusy(false);
+                    if (b == null) {
+                        Toast.makeText(CameraActivity.this, R.string.cam_error, Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    Processor.zoom = engine.zoom() * engine.lensFactor();
+                    Processor.portrait = sub == 8;
+                    Processor.shot(CameraActivity.this, b, rot, level, quality(), done);
+                    updateStatus();
+                });
             }
 
             @Override
             public void onError(ImageCaptureException e) {
-                busy = false;
-                shutter.setBusy(false);
-                Toast.makeText(CameraActivity.this, R.string.cam_error, Toast.LENGTH_SHORT).show();
+                runOnUiThread(() -> {
+                    busy = false;
+                    shutter.setBusy(false);
+                    Toast.makeText(CameraActivity.this, R.string.cam_error, Toast.LENGTH_SHORT).show();
+                });
             }
         });
     }
@@ -1954,6 +1970,7 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         final int n = Math.max(3, Math.min(10, Store.num(this, "night_frames", 6)));
         busy = true;
         shutter.setBusy(true);
+        engine.lockBurst(true);
         nextFrame(0, n, new ArrayList<>(), new int[]{0});
     }
 
@@ -1963,30 +1980,37 @@ public class CameraActivity extends BaseActivity implements CameraEngine.Listene
         engine.capture(new ImageCapture.OnImageCapturedCallback() {
             @Override
             public void onCaptureSuccess(ImageProxy image) {
-                byte[] b = jpegBytes(image);
-                if (i == 0) rot[0] = image.getImageInfo().getRotationDegrees();
+                final byte[] b = jpegBytes(image);
+                final int r0 = image.getImageInfo().getRotationDegrees();
                 image.close();
-                if (b != null) frames.add(b);
-                if (i + 1 < n) nextFrame(i + 1, n, frames, rot);
-                else endNight(frames, rot[0]);
+                runOnUiThread(() -> {
+                    if (i == 0) rot[0] = r0;
+                    if (b != null) frames.add(b);
+                    if (i + 1 < n) nextFrame(i + 1, n, frames, rot);
+                    else endNight(frames, rot[0]);
+                });
             }
 
             @Override
             public void onError(ImageCaptureException e) {
-                if (frames.isEmpty()) {
-                    nightText = "";
-                    busy = false;
-                    shutter.setBusy(false);
-                    updateStatus();
-                    Toast.makeText(CameraActivity.this, R.string.cam_error, Toast.LENGTH_SHORT).show();
-                } else {
-                    endNight(frames, rot[0]);   // keep the frames that did arrive
-                }
+                runOnUiThread(() -> {
+                    if (frames.isEmpty()) {
+                        engine.lockBurst(false);
+                        nightText = "";
+                        busy = false;
+                        shutter.setBusy(false);
+                        updateStatus();
+                        Toast.makeText(CameraActivity.this, R.string.cam_error, Toast.LENGTH_SHORT).show();
+                    } else {
+                        endNight(frames, rot[0]);
+                    }
+                });
             }
         });
     }
 
     private void endNight(List<byte[]> frames, int rot) {
+        engine.lockBurst(false);
         nightText = "";
         busy = false;
         shutter.setBusy(false);

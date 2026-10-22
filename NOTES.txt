@@ -62,3 +62,11 @@
 - Preview height calculation no longer depends on the measured top bar height, so 9:16 / full previews always reach the top of the screen.
 - Top pills: the capture / recording status pill ("Hold still 2/3", timer, "Enhancing photo") now sits on its own row under the info and ratio pills, so they can no longer overlap.
 - Lens row and pro panel position now comes from layout positions (not screen positions affected by the intro animation) and is refreshed whenever the preview, top bar or bottom capsule change size; fixes the 0.6 / 1x / 2 / 4 buttons landing on the mode strip.
+- Launcher icon redrawn in the style of the stock camera icon (light grey squircle, white camera body, dark lens, small flash dot); adaptive background / foreground / themed layers and the same drawing for the in app brand mark.
+- Splash: animated vector in the same drawing (tile pops in, camera body rises, lens turns in with a small overshoot, shine and flash dot last), then the icon scales out into the camera.
+- Status bar is hidden everywhere (camera, settings, dialogs) with a swipe from the top edge to show it briefly; content is laid out edge to edge and only keeps clear of the display cutout, navigation bar and keyboard, so nothing moves when the bar appears.
+- Threads: JPEG capture callbacks now run on their own capture thread (copy / crop / exposure statistics are no longer done on the UI thread); the UI only receives the result. Night merge decodes the next frame on a separate decode thread while the previous one is being merged.
+- Native code: work is handed out in small chunks dynamically instead of one fixed slice per core, so fast cores take more rows on phones with big and little cores. Output is identical (at most 1 level of rounding), no thread sanitizer reports.
+- Night / multi frame shots: exposure and white balance are locked for the duration of the burst so all frames match before merging; the lock is released when the burst ends and on every re-bind.
+- Smoothness: shared ease out / ease in curves, hardware layers for the options panel and the intro, longer settle on panels.
+- Settings reorganised: main page = Camera (Photos, Processing, Deep capture, Video), View, App (appearance, language, permissions), Semo apps, About. Each camera entry opens its own page with a slide animation; back returns to the main page first.

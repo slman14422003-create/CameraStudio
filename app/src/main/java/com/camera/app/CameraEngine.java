@@ -89,6 +89,17 @@ final class CameraEngine {
     private final PreviewView view;
     private final Listener listener;
     private final Executor main;
+    private final Executor capExec = java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(() -> {
+            try {
+                android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_FOREGROUND);
+            } catch (Throwable ignored) {
+            }
+            r.run();
+        }, "cam-capture");
+        t.setDaemon(true);
+        return t;
+    });
 
     private ProcessCameraProvider provider;
     private ExtensionsManager ext;
@@ -163,6 +174,7 @@ final class CameraEngine {
     Size stdSize, maxSize;   // biggest normal 4:3 JPEG (binned, e.g. 12 MP) and biggest overall (e.g. 50 MP)
     boolean hiresAvailable;
     private Range<Integer> nightFps;
+    private volatile boolean burstLock;
     private boolean nrHq, edgeHq, abHq, shadeHq, hotHq, toneHq;
     private volatile int liveIso;
     private volatile long liveExpNs;
@@ -838,6 +850,7 @@ final class CameraEngine {
             };
             zoomData.observe(act, zoomObs);
 
+            burstLock = false;
             applyOptions();
             if (torch && mode == VIDEO) {
                 try {
@@ -904,10 +917,20 @@ final class CameraEngine {
             if (mode == NIGHT && nightFps != null) {
                 b.setCaptureRequestOption(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, nightFps);
             }
+            if (burstLock && !manualAe) {
+                b.setCaptureRequestOption(CaptureRequest.CONTROL_AE_LOCK, true);
+                b.setCaptureRequestOption(CaptureRequest.CONTROL_AWB_LOCK, true);
+            }
             if (manualAe && capture != null) capture.setFlashMode(ImageCapture.FLASH_MODE_OFF);
             Camera2CameraControl.from(camera.getCameraControl()).setCaptureRequestOptions(b.build());
         } catch (Throwable ignored) {
         }
+    }
+
+    void lockBurst(boolean on) {
+        if (burstLock == on) return;
+        burstLock = on;
+        applyOptions();
     }
 
     boolean manualAeActive() {
@@ -966,12 +989,11 @@ final class CameraEngine {
         }
     }
 
-    /** Takes one JPEG. Must be called on the main thread; the callback runs on the main thread. */
     void capture(ImageCapture.OnImageCapturedCallback cb) {
         if (capture == null) {
             cb.onError(new androidx.camera.core.ImageCaptureException(ImageCapture.ERROR_CAMERA_CLOSED, "no camera", null));
             return;
         }
-        capture.takePicture(main, cb);
+        capture.takePicture(capExec, cb);
     }
 }

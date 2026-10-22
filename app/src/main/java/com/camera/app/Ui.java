@@ -44,7 +44,7 @@ public final class Ui {
         v.animate().alpha(1f).translationY(0f)
                 .setStartDelay(Math.min(Math.max(index, 0), 9) * 28L)
                 .setDuration(300)
-                .setInterpolator(new android.view.animation.DecelerateInterpolator(1.6f))
+                .setInterpolator(Motion.OUT)
                 .start();
     }
 
